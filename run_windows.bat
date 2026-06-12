@@ -46,7 +46,9 @@ uv pip install -r requirements.txt --extra-index-url https://abetlen.github.io/l
 
 python -c "import llama_cpp" >nul 2>&1
 if %ERRORLEVEL% neq 0 (
-    echo [!] Cai dat voi CUDA that bai, chuyen sang cai dat ban CPU co ban...
+    echo [!] Cai dat voi CUDA that bai (co the do may khong co Card NVIDIA).
+    echo [i] Dang xoa ban CUDA va cai dat lai ban CPU co ban...
+    uv pip uninstall -y llama-cpp-python
     uv pip install llama-cpp-python
 )
 
