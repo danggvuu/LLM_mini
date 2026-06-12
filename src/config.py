@@ -15,9 +15,7 @@ class Settings(BaseSettings):
 
     @property
     def qdrant_collection(self) -> str:
-        if self.low_vram_mode:
-            return self.qdrant_collection_base + "_mini_vn"
-        return self.qdrant_collection_base
+        return self.qdrant_collection_base + "_v2"
 
     # Chunking & Retrieval Parameters
     chunk_size: int = Field(default=1000, ge=100)
@@ -28,12 +26,12 @@ class Settings(BaseSettings):
     embedding_model: str = "GreenNode/GreenNode-Embedding-Large-VN-Mixed-V1"
 
     # LLM Providers Configuration
-    llm_provider: Literal["hf_local", "gemini", "vllm"] = "gemini"
+    llm_provider: Literal["hf_local", "gemini", "vllm"] = "hf_local"
     llm_temperature: float = Field(default=0.1, ge=0.0, le=2.0)
 
     # Local Hugging Face Model Parameters
     hf_model: str = "Qwen/Qwen2.5-1.5B-Instruct"
-    hf_device: str = "cpu"  # Supports 'cpu', 'cuda', 'mps' etc.
+    hf_device: str = "auto"  # Supports 'auto', 'cpu', 'cuda', 'mps' etc.
     hf_max_new_tokens: int = Field(default=2048, ge=1)
     
     # --- NEW: GGUF Model Parameters (Llama.cpp) ---
@@ -69,7 +67,7 @@ class Settings(BaseSettings):
     session_max_messages: int = Field(default=20, ge=2, le=100)
 
     # --- NEW: Low VRAM Mode ---
-    low_vram_mode: bool = Field(default=True, description="Use lightweight models for retrieval to save VRAM for LLM")
+    low_vram_mode: bool = Field(default=False, description="Use lightweight models for retrieval to save VRAM for LLM")
 
     # --- NEW: Hybrid Search & Reranking ---
     hybrid_initial_k: int = Field(default=15, ge=1, le=100)
@@ -96,6 +94,16 @@ class Settings(BaseSettings):
             pass
         if self.hybrid_rerank_k > self.hybrid_initial_k:
             raise ValueError("hybrid_rerank_k must be <= hybrid_initial_k.")
+            
+        if self.hf_device == "auto":
+            import torch
+            if torch.cuda.is_available():
+                self.hf_device = "cuda"
+            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                self.hf_device = "mps"
+            else:
+                self.hf_device = "cpu"
+                
         return self
 
 @lru_cache(maxsize=1)

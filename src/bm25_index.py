@@ -55,6 +55,11 @@ class BM25Index:
         from rank_bm25 import BM25Okapi
 
         self._documents = documents
+        if not documents:
+            self._bm25 = None
+            logger.info("BM25 index built with 0 documents (empty).")
+            return
+
         tokenized_corpus = [self._tokenize(doc.text) for doc in documents]
         self._bm25 = BM25Okapi(tokenized_corpus)
         logger.info("BM25 index built with %d documents.", len(documents))

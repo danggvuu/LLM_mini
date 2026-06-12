@@ -16,31 +16,8 @@ from src.config import settings
 # ---------------------------------------------------------------------------
 
 def _build_hf_local():
-    if settings.low_vram_mode:
-        from src.llm_gguf import get_gguf_llm
-        return get_gguf_llm()
-
-    import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
-    from langchain_huggingface import ChatHuggingFace, HuggingFacePipeline
-
-    tokenizer = AutoTokenizer.from_pretrained(settings.hf_model)
-    model = AutoModelForCausalLM.from_pretrained(
-        settings.hf_model,
-        dtype=torch.bfloat16,
-        device_map=settings.hf_device
-    )
-
-    text_gen = pipeline(
-        task="text-generation",
-        model=model,
-        tokenizer=tokenizer,
-        return_full_text=False,
-    )
-    text_gen.generation_config.max_new_tokens = settings.hf_max_new_tokens
-    text_gen.generation_config.do_sample = settings.llm_temperature > 0
-
-    return ChatHuggingFace(llm=HuggingFacePipeline(pipeline=text_gen))
+    from src.llm_gguf import get_gguf_llm
+    return get_gguf_llm()
 
 
 def _build_gemini():

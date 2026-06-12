@@ -46,15 +46,25 @@ def _api_stream(path: str, payload: dict):
     """Call streaming API and yield text chunks."""
     try:
         with httpx.stream("POST", f"{_API}{path}", json=payload, timeout=180.0) as response:
+            if response.status_code != 200:
+                response.read()
+                try:
+                    error_data = response.json()
+                    detail = error_data.get("detail", response.text)
+                except Exception:
+                    detail = response.text
+                yield f"\n\n⚠️ Lỗi hệ thống ({response.status_code}): {detail}"
+                return
+
             for line in response.iter_lines():
                 if line.startswith("data: "):
                     data = json.loads(line[6:])
-                    if data.get("done"):
-                        break
                     if "text" in data:
                         yield data["text"]
+                    if data.get("done"):
+                        break
     except Exception as e:
-        yield f"\n\n⚠️ Lỗi streaming: {e}"
+        yield f"\n\n⚠️ Lỗi kết nối đến Backend: {e}"
 
 # -----------------------------------------------------------------------------
 # Trạng thái hệ thống (State Machine)
@@ -101,9 +111,8 @@ def render_dashboard():
     
     st.markdown("**Chọn AI Backend cho thẻ này:**")
     provider_options = {
-        "🌐 Gemini API (Nhanh, cần API Key — ⚠️ không dùng với data riêng tư)": "gemini",
-        "🖥️ Local AI — HuggingFace (Riêng tư, chạy trên GPU của bạn)": "hf_local",
-        "⚡ Local AI — vLLM (Riêng tư, hiệu suất cao)": "vllm",
+        "🖥️ Universal Local AI (Riêng tư, 100% tự động tương thích mọi phần cứng)": "hf_local",
+        "🌐 Gemini API (Nhanh, cần API Key — ⚠️ không dùng với data riêng tư)": "gemini"
     }
     selected_provider_label = st.selectbox(
         "LLM Backend",
@@ -239,8 +248,6 @@ def _sidebar_notebook(notebook_id: str, notebook_name: str):
                         elif status and status.get("status") == "error":
                             st.sidebar.error(f"❌ Lỗi: {status.get('error_message')}")
                         
-                        # Xóa file uploader state để nó refresh
-                        st.session_state["last_uploaded_file_id"] = None
                         st.rerun()
 
 

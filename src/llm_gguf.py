@@ -25,10 +25,12 @@ def get_llama_cpp():
     
     logger.info("Initializing LlamaCpp from: %s", model_path)
     
-    # n_gpu_layers=-1 means offload all layers to GPU (perfect for 1.5B models on 4GB VRAM)
+    # n_gpu_layers=-1 means offload all layers to GPU
+    # n_batch=2048 drastically speeds up prompt evaluation (Time-to-First-Token) for long RAG contexts
     llm = Llama(
         model_path=model_path,
         n_ctx=4096,
+        n_batch=2048,
         n_gpu_layers=-1,
         chat_format="chatml",
         verbose=False
