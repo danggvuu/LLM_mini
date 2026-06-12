@@ -29,7 +29,7 @@ def get_llama_cpp():
     # n_batch=2048 drastically speeds up prompt evaluation (Time-to-First-Token) for long RAG contexts
     llm = Llama(
         model_path=model_path,
-        n_ctx=4096,
+        n_ctx=8192,
         n_batch=2048,
         n_gpu_layers=-1,
         chat_format="chatml",
