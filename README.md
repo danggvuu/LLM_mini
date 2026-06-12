@@ -1,259 +1,86 @@
-# Simple NotebookLM 📓 v2.0
+# 📓 NotebookLM-Mini (Local AI Edition)
 
-Simple NotebookLM is a grounded learning assistant based on a **production-grade Retrieval-Augmented Generation (RAG)** architecture. It allows you to upload personal textbooks, articles, or documents in multiple formats (PDF, DOCX, PPTX, XLSX, HTML, etc.), automatically index them using a **hybrid search pipeline** (Vector + Keyword), and then interact with the content through smart Q&A with exact citations, Map-Reduce summaries, and automatically generated interactive study materials (Quizzes and Flashcards).
+NotebookLM-Mini là một trợ lý học tập cá nhân dựa trên kiến trúc **Retrieval-Augmented Generation (RAG)** cấp độ sản phẩm. Phiên bản này đã được độ lại hoàn toàn để chạy **100% Offline (Không cần Internet)** sử dụng trí tuệ nhân tạo cục bộ (Local AI), bảo mật tuyệt đối dữ liệu cá nhân của bạn.
 
-This project is fully implemented based on the **AI VIET NAM (AIO2025)** curriculum specification.
+Dự án cho phép bạn tải lên tài liệu cá nhân (PDF, DOCX, PPTX, HTML...), tự động lập chỉ mục đa chiều (Hybrid Search) và tương tác với tài liệu thông qua:
+- 💬 **Hỏi đáp siêu tốc** với trích dẫn chính xác.
+- 📝 **Tóm tắt thông minh** sử dụng kỹ thuật Map-Reduce.
+- 🎯 **Tạo bài trắc nghiệm (Quiz) & Flashcards** tự động để ôn tập.
 
 ---
 
-## 🏗️ System Architecture (Flowchart TB)
+## 🌟 Tính Năng Nổi Bật
 
-```
+1. **🚀 1-Click Run (Chạy 1 chạm):** Tự động hóa hoàn toàn quá trình cài đặt môi trường, tải Model và cấu hình hệ thống trên cả Windows và macOS. Bạn không cần biết code vẫn chạy được!
+2. **🧠 Local AI Cực Mạnh:** Sử dụng mô hình `Qwen2.5-3B-Instruct` dạng nén GGUF qua Llama.cpp. Đủ thông minh để hiểu tiếng Việt xuất sắc, nhưng đủ nhẹ để chạy trên máy RAM 8GB.
+3. **⚡ Hardware Acceleration (Ép xung phần cứng):** Tự động nhận diện và tận dụng tối đa sức mạnh của **Apple Silicon (Metal)** trên Mac và **Card rời NVIDIA (CUDA 12.1)** trên Windows.
+4. **🔍 Hybrid Search & Reranking:** Kết hợp tìm kiếm ngữ nghĩa (GreenNode Embedding) và từ khóa (BM25), sau đó lọc lại bằng Cross-Encoder (BAAI Reranker) để đảm bảo không trượt phát nào.
+
+---
+
+## 🛠️ Hướng Dẫn Sử Dụng Nhanh
+
+### Đối với người dùng Mac (macOS)
+1. Tải toàn bộ thư mục dự án này về máy.
+2. Mở thư mục, tìm file có tên `run_mac.command`.
+3. Nhấp đúp chuột vào file đó. Hệ thống sẽ tự động cài đặt và mở giao diện Web lên cho bạn.
+
+*(Mẹo: Lần chạy đầu tiên sẽ mất khoảng 1-2 phút để tải "Não bộ" AI (khoảng 2GB) về máy. Từ lần thứ 2 trở đi sẽ mất chưa tới 5 giây).*
+
+### Đối với người dùng Windows
+1. Tải toàn bộ thư mục dự án này về máy.
+2. Nhấp đúp vào file `run_windows.bat`.
+3. Hệ thống sẽ tự động cấu hình (bao gồm cả cài NVIDIA CUDA nếu máy có Card rời) và mở trình duyệt lên cho bạn sử dụng.
+
+---
+
+## 🏗️ Kiến Trúc Hệ Thống (Architecture)
+
+```text
 ┌─────────────────────────────────────────────────────────────────────┐
-│  Tầng Giao diện & Định tuyến API                                   │
-│  ┌──────────────────────┐  ┌──────────────────────────────────┐   │
-│  │  Streamlit Web UI    │◄─►│  FastAPI Backend (SSE Support)  │   │
-│  │  Workspace-based     │  │  REST API + SSE Stream           │   │
-│  └──────────────────────┘  └──────────┬───────────────────────┘   │
-└──────────────────────────────────────┬──────────────────────────────┘
-                                       │
-┌──────────────────────────────────────▼──────────────────────────────┐
-│  Tầng Vận hành & Giám sát (MLOps)                                  │
-│  ┌─────────────┐  ┌────────────────┐  ┌─────────────────────────┐ │
-│  │ Redis Cache  │  │ Session Memory │  │ Prometheus + LangSmith  │ │
-│  │ ~0.1s reply  │  │ Chat History   │  │ Tracing & Feedback      │ │
-│  └─────────────┘  └────────────────┘  └─────────────────────────┘ │
-└──────────────────────────────────────┬──────────────────────────────┘
-                                       │
-┌──────────────────────────────────────▼──────────────────────────────┐
-│  Tầng Xử lý Dữ liệu Bất đồng bộ                                   │
-│  ┌────────────────┐  ┌───────────────┐  ┌──────────────────────┐  │
-│  │ Background     │─►│ MarkItDown    │─►│ Recursive Chunker    │  │
-│  │ Worker (FastAPI│  │ Parser (OCR)  │  │ 1000 size / 150 olap │  │
-│  │ BackgroundTask)│  └───────────────┘  └──────────┬───────────┘  │
-│  └────────────────┘                                │              │
-│                                    ┌───────────────┼──────────┐   │
-│                                    ▼               ▼          │   │
-│                            ┌──────────────┐ ┌────────────┐    │   │
-│                            │ GreenNode    │ │ RankBM25   │    │   │
-│                            │ Embedding    │ │ Inv. Index │    │   │
-│                            └──────┬───────┘ └─────┬──────┘    │   │
-└───────────────────────────────────┼───────────────┼───────────────┘
-                                    │               │
-┌───────────────────────────────────▼───────────────▼───────────────┐
-│  Kho Tri thức (Data Isolation)                                    │
-│  ┌────────────────────────┐  ┌────────────────────────────────┐  │
-│  │ Qdrant Vector DB       │  │ RankBM25 (RAM Inverted Index)  │  │
-│  │ Payload Index          │  │ Persisted to disk              │  │
-│  └────────────────────────┘  └────────────────────────────────┘  │
-└──────────────────────────────────┬────────────────────────────────┘
-                                   │
-┌──────────────────────────────────▼────────────────────────────────┐
-│  Tầng Truy xuất Lai & Lọc nhiễu                                  │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐   │
-│  │ Scope Router │─►│ Hybrid Search│─►│ Cross-Encoder        │   │
-│  │ Query Analy. │  │ (Parallel)   │  │ Reranker (BGE-v2-m3) │   │
-│  └──────────────┘  └──────────────┘  └──────────┬───────────┘   │
-│                                                  ▼               │
-│                                       ┌──────────────────────┐   │
-│                                       │ Context Builder      │   │
-│                                       └──────────┬───────────┘   │
-└──────────────────────────────────────────────────┼───────────────┘
-                                                   │
-┌──────────────────────────────────────────────────▼───────────────┐
-│  Tầng Tạo sinh & Kiểm duyệt                                     │
-│  ┌─────────────┐  ┌───────────────┐  ┌────────────────────────┐ │
-│  │ Jinja2      │─►│ LLM Factory   │─►│ Stream Batching (50ms) │ │
-│  │ Templates   │  │ vLLM/HF/Gemini│  │ → SSE to Frontend      │ │
-│  └─────────────┘  └───────────────┘  └────────────────────────┘ │
-│  ┌──────────────────────┐  ┌──────────────────────────────────┐ │
-│  │ Map-Reduce Batching  │  │ Pydantic Validation              │ │
-│  │ Long-doc summarize   │  │ JSON type enforcement            │ │
-│  └──────────────────────┘  └──────────────────────────────────┘ │
-└──────────────────────────────────────────────────────────────────┘
+│  Tầng Giao diện & Định tuyến API                                    │
+│  ┌──────────────────────┐  ┌──────────────────────────────────┐     │
+│  │  Streamlit Web UI    │◄─►│  FastAPI Backend (SSE Support)  │     │
+│  └──────────────────────┘  └──────────┬───────────────────────┘     │
+└───────────────────────────────────────┬─────────────────────────────┘
+                                        ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  Tầng Trí Tuệ Nhân Tạo (Local AI Engine)                            │
+│  ┌──────────────────────┐  ┌──────────────────────────────────┐     │
+│  │ Llama.cpp Engine     │  │ Qwen2.5-3B-Instruct (GGUF 4-bit) │     │
+│  │ (Metal / CUDA 12)    │  │ 100% Offline, Privacy First      │     │
+│  └──────────┬───────────┘  └──────────────────────────────────┘     │
+└─────────────┼───────────────────────────────────────────────────────┘
+              ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  Tầng Xử lý Dữ liệu & RAG Pipeline                                  │
+│  ┌────────────────┐  ┌───────────────┐  ┌──────────────────────┐    │
+│  │ MarkItDown     │─►│ Hybrid Search │─►│ Cross-Encoder        │    │
+│  │ Parser (OCR)   │  │ (Qdrant+BM25) │  │ Reranker (BGE-m3)    │    │
+│  └────────────────┘  └───────────────┘  └──────────────────────┘    │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 🌟 Key Features
+## ⚙️ Tùy Chỉnh (Dành cho Developer)
 
-1. **Grounded Q&A (Hỏi đáp có trích dẫn)**: Answers user questions using **Hybrid Search** (Semantic + Keyword) with **Cross-Encoder Reranking**. Traces all sentences back to sources using precise `[S1]`, `[S2]` markers.
-2. **Streaming Responses (SSE)**: Real-time token streaming via Server-Sent Events with configurable token batching.
-3. **Redis Semantic Cache**: Sub-100ms responses for repeated/similar queries.
-4. **Map-Reduce Summarization**: Dynamically summarizes extremely long texts by chunking, summarizing individually, and aggregating results.
-5. **Interactive Quizzes & Flashcards**: Generates study materials with Pydantic-validated JSON output.
-6. **Multimodal Document Support**: MarkItDown parser handles PDF, DOCX, PPTX, XLSX, HTML, Markdown, and images with OCR.
-7. **Async Ingestion**: Background file processing with status tracking.
-8. **Observability**: Prometheus metrics + optional LangSmith tracing + user feedback (thumbs up/down).
-9. **Multi-interface Support**:
-   - **Streamlit Web UI**: Premium glassmorphism dark-theme dashboard with workspace isolation.
-   - **FastAPI REST API**: Decoupled core endpoints with SSE streaming.
-   - **Typer CLI**: Direct command-line automation.
-10. **RAG Evaluation Platform**: Built-in benchmark harness with `ragas` metrics.
+Bạn có thể thay đổi cách hệ thống hoạt động thông qua file `.env`:
 
----
+- `RAG_LLM_PROVIDER`: Đặt là `hf_local` để dùng AI cục bộ. (Hỗ trợ cả `gemini` nếu bạn muốn xài API key).
+- `RAG_LLM_TEMPERATURE`: Điều chỉnh độ sáng tạo của AI (Khuyên dùng 0.4 - 0.6).
+- `RAG_HYBRID_INITIAL_K`: Số lượng đoạn văn bản lấy ra lần đầu (Mặc định: 8).
+- `RAG_HYBRID_RERANK_K`: Số lượng đoạn văn bản tinh tuý nhất giữ lại đưa cho AI (Mặc định: 3 - Để tối ưu tốc độ).
 
-## 📂 Project Structure
-
-```
-./
-├── data/                          # Document Input folder (PDF, DOCX, etc.)
-├── storage/
-│   ├── qdrant/                    # Qdrant vector DB storage
-│   └── bm25/                     # BM25 index persistence
-├── src/
-│   ├── __init__.py
-│   ├── config.py                  # Pydantic Settings (extended)
-│   ├── schemas.py                 # Pydantic data schemas
-│   ├── cache.py                   # Redis Semantic Cache
-│   ├── session.py                 # Short-term Conversation Memory
-│   ├── observability.py           # Prometheus + LangSmith
-│   ├── indexing.py                # MarkItDown parser + chunking
-│   ├── worker.py                  # Background Worker (FastAPI BackgroundTasks)
-│   ├── bm25_index.py              # RankBM25 inverted index
-│   ├── store.py                   # Qdrant client
-│   ├── retrieval/                 # Retrieval pipeline
-│   │   ├── __init__.py
-│   │   ├── router.py             # Scope Resolution
-│   │   ├── hybrid_search.py      # Hybrid Search (Qdrant + BM25)
-│   │   ├── reranker.py           # Cross-Encoder Reranker
-│   │   └── context_builder.py    # Context packaging
-│   ├── rag.py                     # Main RAG orchestrator
-│   ├── llm.py                     # LLM Factory Pattern (vLLM/HF/Gemini)
-│   ├── stream_batching.py         # Token Buffer for SSE
-│   ├── learning.py                # Summarize/Quiz/Flashcards
-│   ├── filters.py                 # Metadata filters
-│   ├── export.py                  # Export formats
-│   ├── prompts/                   # Jinja2 templates
-│   │   ├── answer.jinja2
-│   │   ├── summary_*.jinja2
-│   │   ├── quiz.jinja2
-│   │   └── flashcards.jinja2
-│   ├── interfaces/
-│   │   ├── __init__.py
-│   │   ├── api.py                # FastAPI + SSE
-│   │   ├── cli.py                # Typer CLI
-│   │   ├── styles.py             # CSS theme
-│   │   └── ui.py                 # Streamlit UI
-│   └── evaluation/               # Ragas benchmarks
-│       ├── __init__.py
-│       ├── benchmark_rag.csv
-│       ├── ragas_evaluator.py
-│       ├── chunking_strategies.py
-│       ├── run_chunking.py
-│       └── run_reranking.py
-├── docker-compose.yml             # Redis server
-├── .env
-├── .env.example
-├── requirements.txt
-├── flowchart TB.txt
-└── README.md
-```
-
----
-
-## 🛠️ Setup Instructions
-
-### 1. Install Dependencies
-Make sure you have Python installed (Python 3.10+ recommended):
+### Chạy thủ công
+Nếu không muốn dùng tool 1-Click:
 ```bash
-pip install -r requirements.txt
-```
-
-### 2. Start Redis (Docker)
-```bash
-docker compose up -d
-```
-This starts a Redis server on port 6379 with persistence. If Redis is unavailable, the system will run without caching.
-
-### 3. Configure Environment Parameters
-Create a copy of `.env.example` as `.env` and configure your API keys:
-```bash
-cp .env.example .env
-```
-Open `.env` and fill in:
-- `GOOGLE_API_KEY`: Your Google Gemini API Key (recommended backend).
-- `RAG_LLM_PROVIDER`: Set to `gemini` (default) or `hf_local`/`vllm`.
-- `RAG_EMBEDDING_MODEL`: Defaults to `GreenNode/GreenNode-Embedding-Large-VN-Mixed-V1`.
-
----
-
-## 🚀 Running the Application
-
-### 1. Start the FastAPI Backend
-```bash
-uvicorn src.interfaces.api:app --reload --host 0.0.0.0 --port 8000
-```
-
-### 2. Start the Streamlit Web UI
-In a separate terminal tab:
-```bash
+uv venv
+source .venv/bin/activate
+uv pip install -r requirements.txt
+uvicorn src.interfaces.api:app --reload
 streamlit run src/interfaces/ui.py
 ```
-Open your browser at `http://localhost:8501` to view the dashboard!
-
-### 3. Monitor Metrics
-- **Prometheus**: `http://localhost:8000/metrics`
-- **Health**: `http://localhost:8000/health`
 
 ---
-
-## 💻 Typer CLI Automation
-
-### 1. Index All Documents
-Place your documents in the `data/` folder and run:
-```bash
-python -m src.interfaces.cli ingest
-```
-
-### 2. Ask Grounded Questions (Hybrid Search + Reranker)
-```bash
-python -m src.interfaces.cli ask "LoRA là gì?"
-```
-
-### 3. Generate Summaries, Quizzes, and Flashcards
-```bash
-python -m src.interfaces.cli summarize --fmt md --output storage/summary.md
-python -m src.interfaces.cli quiz --count 5
-python -m src.interfaces.cli flashcards --count 8
-```
-
-### 4. Clear Cache
-```bash
-python -m src.interfaces.cli cache-clear
-```
-
----
-
-## 📊 Running Evaluations (Ragas)
-
-### 1. Run Chunking Evaluation
-```bash
-python -m src.evaluation.run_chunking
-```
-
-### 2. Run Reranking Evaluation
-```bash
-python -m src.evaluation.run_reranking
-```
-All outputs are saved as structured JSON matrices in `storage/evaluation/` for analysis.
-
----
-
-## 🔌 API Endpoints
-
-| Endpoint | Method | Description |
-|---|---|---|
-| `/health` | GET | Health check |
-| `/documents` | GET | List indexed documents |
-| `/upload` | POST | Upload file (async, returns task_id) |
-| `/upload/status/{task_id}` | GET | Check upload task status |
-| `/ask` | POST | Q&A (synchronous, full response) |
-| `/ask/stream` | POST | Q&A (streaming via SSE) |
-| `/summarize` | POST | Generate summary (Map-Reduce) |
-| `/quiz` | POST | Generate quiz |
-| `/flashcards` | POST | Generate flashcards |
-| `/session/{session_id}` | GET | Get conversation history |
-| `/session/{session_id}` | DELETE | Clear conversation history |
-| `/feedback` | POST | Record thumbs up/down |
-| `/metrics` | GET | Prometheus metrics |
+*Dự án được xây dựng dựa trên giáo trình AI VIET NAM (AIO2025) và tối ưu hóa trải nghiệm Local AI.*
