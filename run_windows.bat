@@ -11,7 +11,7 @@ cd /d "%~dp0"
 :: 1. Kiểm tra Python
 python --version >nul 2>&1
 if %ERRORLEVEL% neq 0 (
-    echo [X] Loi: Khong tim thay Python! Vui long cai dat Python tu trang chu (nho tich "Add Python to PATH"): https://www.python.org/downloads/
+    echo [X] Loi: Khong tim thay Python! Vui long cai dat Python tu trang chu [nho tich Add Python to PATH]: https://www.python.org/downloads/
     pause
     exit /b
 )
