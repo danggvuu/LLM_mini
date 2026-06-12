@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field, model_validator
 
 class ChunkMetadata(BaseModel):
     document_id: str
+    notebook_id: Optional[str] = None
     filename: str
     source: str
     page: int

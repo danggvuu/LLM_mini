@@ -7,51 +7,8 @@ from functools import lru_cache
 from typing import List, Optional, Any, Iterator
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.outputs import ChatResult, ChatGeneration
 from langchain_openai import ChatOpenAI
 from src.config import settings
-
-
-class LegacyGeminiChat(BaseChatModel):
-    model_name: str
-    temperature: float
-    api_key: str
-
-    def _generate(self, messages: List[BaseMessage], stop: Optional[List[str]] = None, run_manager: Optional[Any] = None, **kwargs: Any) -> ChatResult:
-        import google.generativeai as genai
-        genai.configure(api_key=self.api_key)
-        model = genai.GenerativeModel(self.model_name)
-
-        prompt = messages[-1].content
-        generation_config = genai.types.GenerationConfig(
-            temperature=self.temperature
-        )
-        res = model.generate_content(prompt, generation_config=generation_config)
-
-        ai_msg = AIMessage(content=res.text)
-        return ChatResult(generations=[ChatGeneration(message=ai_msg)])
-
-    def stream_text(self, prompt: str) -> Iterator[str]:
-        """Stream tokens from Gemini."""
-        import google.generativeai as genai
-        genai.configure(api_key=self.api_key)
-        model = genai.GenerativeModel(self.model_name)
-
-        generation_config = genai.types.GenerationConfig(
-            temperature=self.temperature
-        )
-        response = model.generate_content(
-            prompt,
-            generation_config=generation_config,
-            stream=True,
-        )
-        for chunk in response:
-            if chunk.text:
-                yield chunk.text
-
-    @property
-    def _llm_type(self) -> str:
-        return "legacy-gemini-chat"
 
 
 # ---------------------------------------------------------------------------
@@ -59,6 +16,10 @@ class LegacyGeminiChat(BaseChatModel):
 # ---------------------------------------------------------------------------
 
 def _build_hf_local():
+    if settings.low_vram_mode:
+        from src.llm_gguf import get_gguf_llm
+        return get_gguf_llm()
+
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
     from langchain_huggingface import ChatHuggingFace, HuggingFacePipeline
@@ -74,7 +35,6 @@ def _build_hf_local():
         task="text-generation",
         model=model,
         tokenizer=tokenizer,
-        device=settings.hf_device,
         return_full_text=False,
     )
     text_gen.generation_config.max_new_tokens = settings.hf_max_new_tokens
@@ -84,10 +44,11 @@ def _build_hf_local():
 
 
 def _build_gemini():
-    return LegacyGeminiChat(
-        model_name=settings.gemini_model,
+    from langchain_google_genai import ChatGoogleGenerativeAI
+    return ChatGoogleGenerativeAI(
+        model=settings.gemini_model,
         temperature=settings.llm_temperature,
-        api_key=settings.google_api_key,
+        google_api_key=settings.google_api_key,
     )
 
 
@@ -137,12 +98,7 @@ def stream_llm(prompt: str, provider=None) -> Iterator[str]:
     """
     llm = get_llm(provider=provider)
 
-    # Use native streaming if available (Gemini)
-    if isinstance(llm, LegacyGeminiChat):
-        yield from llm.stream_text(prompt)
-        return
-
-    # For vLLM (ChatOpenAI) — use LangChain streaming
+    # Use LangChain streaming interface for all providers
     if hasattr(llm, 'stream'):
         try:
             for chunk in llm.stream([HumanMessage(content=prompt)]):

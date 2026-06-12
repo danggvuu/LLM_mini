@@ -42,8 +42,14 @@ class TaskTracker:
 
     def __init__(self):
         self._tasks: Dict[str, TaskInfo] = {}
+        self._last_cleanup = time.time()
 
     def create(self, filename: str) -> TaskInfo:
+        # Passive Garbage Collection (mỗi tiếng 1 lần)
+        if time.time() - self._last_cleanup > 3600:
+            self.cleanup_old()
+            self._last_cleanup = time.time()
+            
         task_id = str(uuid.uuid4())[:8]
         task = TaskInfo(task_id=task_id, filename=filename)
         self._tasks[task_id] = task
@@ -76,7 +82,7 @@ def get_task_tracker() -> TaskTracker:
     return _tracker
 
 
-def process_file_background(file_bytes: bytes, filename: str, task: TaskInfo) -> None:
+def process_file_background(file_bytes: bytes, filename: str, notebook_id: str, task: TaskInfo, privacy: str = "public") -> None:
     """
     Background task function to process and ingest a file.
     Called by FastAPI BackgroundTasks.
@@ -89,8 +95,13 @@ def process_file_background(file_bytes: bytes, filename: str, task: TaskInfo) ->
     logger.info("Background processing started: %s (task %s)", filename, task.task_id)
 
     try:
-        result = save_and_ingest_file(file_bytes, filename)
+        result = save_and_ingest_file(file_bytes, filename, notebook_id)
+        
+        from src.notebook_store import get_notebook_store
+        get_notebook_store().add_document(notebook_id, result["filename"], result["chunks_indexed"], privacy=privacy)
+
         task.status = "done"
+        task.filename = result["filename"]
         task.chunks_indexed = result["chunks_indexed"]
         task.completed_at = time.time()
         logger.info(

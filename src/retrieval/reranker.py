@@ -17,11 +17,19 @@ logger = logging.getLogger(__name__)
 def _load_cross_encoder():
     """Lazy-load the Cross-Encoder model."""
     from sentence_transformers import CrossEncoder
+    import torch
 
     model_name = settings.reranker_model
+    if settings.low_vram_mode:
+        model_name = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
+        
     logger.info("Loading Cross-Encoder model: %s ...", model_name)
     try:
-        model = CrossEncoder(model_name)
+        model = CrossEncoder(
+            model_name,
+            device=settings.hf_device,
+            model_kwargs={"torch_dtype": torch.float16}
+        )
         logger.info("Cross-Encoder loaded successfully.")
         return model
     except Exception as exc:

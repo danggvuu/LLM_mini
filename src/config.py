@@ -11,7 +11,13 @@ class Settings(BaseSettings):
     data_dir: Path = Path("data")
     storage_dir: Path = Path("storage/qdrant")
     bm25_dir: Path = Path("storage/bm25")
-    qdrant_collection: str = "rag_chunks"
+    qdrant_collection_base: str = Field(default="rag_chunks", alias="RAG_QDRANT_COLLECTION")
+
+    @property
+    def qdrant_collection(self) -> str:
+        if self.low_vram_mode:
+            return self.qdrant_collection_base + "_mini_vn"
+        return self.qdrant_collection_base
 
     # Chunking & Retrieval Parameters
     chunk_size: int = Field(default=1000, ge=100)
@@ -29,6 +35,10 @@ class Settings(BaseSettings):
     hf_model: str = "Qwen/Qwen2.5-1.5B-Instruct"
     hf_device: str = "cpu"  # Supports 'cpu', 'cuda', 'mps' etc.
     hf_max_new_tokens: int = Field(default=2048, ge=1)
+    
+    # --- NEW: GGUF Model Parameters (Llama.cpp) ---
+    gguf_model_repo: str = "Qwen/Qwen2.5-3B-Instruct-GGUF"
+    gguf_model_file: str = "qwen2.5-3b-instruct-q4_k_m.gguf"
 
     # Google Gemini API Config
     gemini_model: str = "gemini-2.5-flash"
@@ -57,6 +67,9 @@ class Settings(BaseSettings):
 
     # --- NEW: Session Memory ---
     session_max_messages: int = Field(default=20, ge=2, le=100)
+
+    # --- NEW: Low VRAM Mode ---
+    low_vram_mode: bool = Field(default=True, description="Use lightweight models for retrieval to save VRAM for LLM")
 
     # --- NEW: Hybrid Search & Reranking ---
     hybrid_initial_k: int = Field(default=15, ge=1, le=100)

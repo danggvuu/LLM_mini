@@ -4,8 +4,15 @@ Prometheus metrics + optional LangSmith tracing.
 """
 import time
 import logging
+import os
 from typing import Optional, Callable, Any
 from functools import wraps
+
+from src.config import settings
+
+metrics_dir = settings.storage_dir / "metrics_mmap"
+metrics_dir.mkdir(parents=True, exist_ok=True)
+os.environ["PROMETHEUS_MULTIPROC_DIR"] = str(metrics_dir)
 
 logger = logging.getLogger(__name__)
 
@@ -15,8 +22,9 @@ logger = logging.getLogger(__name__)
 
 try:
     from prometheus_client import (
-        Counter, Histogram, Gauge, Info,
+        Counter, Histogram, Gauge,
         generate_latest, CONTENT_TYPE_LATEST,
+        CollectorRegistry, multiprocess
     )
     PROMETHEUS_AVAILABLE = True
 except ImportError:
@@ -56,15 +64,15 @@ if PROMETHEUS_AVAILABLE:
         "User feedback thumbs up/down",
         ["feedback_type"],
     )
-    APP_INFO = Info(
-        "rag_app",
-        "Application metadata",
-    )
-    APP_INFO.info({
-        "app_name": "Simple NotebookLM",
-        "version": "2.0.0",
-        "architecture": "Flowchart TB",
-    })
+    # APP_INFO = Info(
+    #     "rag_app",
+    #     "Application metadata",
+    # )
+    # APP_INFO.info({
+    #     "app_name": "Simple NotebookLM",
+    #     "version": "2.0.0",
+    #     "architecture": "Flowchart TB",
+    # })
 
 
 def record_request(endpoint: str, status: str = "success"):
@@ -113,7 +121,9 @@ def record_feedback(feedback_type: str):
 def get_metrics_response():
     """Generate Prometheus metrics response."""
     if PROMETHEUS_AVAILABLE:
-        return generate_latest(), CONTENT_TYPE_LATEST
+        registry = CollectorRegistry()
+        multiprocess.MultiProcessCollector(registry)
+        return generate_latest(registry), CONTENT_TYPE_LATEST
     return b"# Prometheus not available\n", "text/plain"
 
 

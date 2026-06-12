@@ -7,6 +7,7 @@ import logging
 import pickle
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
+from cachetools import LRUCache
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -62,6 +63,14 @@ class BM25Index:
         """Add documents to the index and rebuild."""
         self._documents.extend(documents)
         self.build(self._documents)
+
+    def remove_document(self, filename: str) -> None:
+        """Remove a specific document from the index and rebuild."""
+        original_count = len(self._documents)
+        self._documents = [doc for doc in self._documents if doc.metadata.get("filename") != filename]
+        if len(self._documents) < original_count:
+            self.build(self._documents)
+            logger.info("Removed %d chunks for %s from BM25 index.", original_count - len(self._documents), filename)
 
     def search(self, query: str, top_k: int = 15) -> List[Tuple[BM25Document, float]]:
         """Search the BM25 index. Returns list of (document, score) tuples."""
@@ -152,16 +161,34 @@ class BM25Index:
         logger.info("BM25 index cleared.")
 
 
-# Module-level singleton
-_index: Optional[BM25Index] = None
+# Module-level singletons per notebook
+_indexes: LRUCache = LRUCache(maxsize=10)
 
-
-def get_bm25_index() -> BM25Index:
-    """Get or create the global BM25 index instance."""
-    global _index
-    if _index is None:
+def get_bm25_index(notebook_id: str) -> BM25Index:
+    """Get or create the BM25 index instance for a specific notebook."""
+    global _indexes
+    if notebook_id not in _indexes:
         from src.config import settings
-        _index = BM25Index(persist_dir=settings.bm25_dir)
+        notebook_dir = settings.bm25_dir / notebook_id
+        index = BM25Index(persist_dir=notebook_dir)
         # Attempt to load persisted index
-        _index.load()
-    return _index
+        index.load()
+        _indexes[notebook_id] = index
+    return _indexes[notebook_id]
+
+def delete_bm25_folder(notebook_id: str):
+    """Delete the BM25 index directory and remove from memory."""
+    import shutil
+    from src.config import settings
+    global _indexes
+    
+    if notebook_id in _indexes:
+        del _indexes[notebook_id]
+        
+    notebook_dir = settings.bm25_dir / notebook_id
+    if notebook_dir.exists():
+        try:
+            shutil.rmtree(notebook_dir)
+            logger.info("Deleted BM25 directory: %s", notebook_dir)
+        except Exception as exc:
+            logger.error("Failed to delete BM25 directory %s: %s", notebook_dir, exc)

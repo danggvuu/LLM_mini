@@ -3,6 +3,7 @@ from pydantic import BaseModel, model_validator
 from qdrant_client.http import models as qmodels
 
 class MetadataFilter(BaseModel):
+    notebook_id: Optional[str] = None
     filename: Optional[str] = None
     filenames: Optional[List[str]] = None
     page: Optional[int] = None

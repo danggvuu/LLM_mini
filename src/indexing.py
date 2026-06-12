@@ -35,7 +35,31 @@ def _load_with_markitdown(path: Path):
 
     try:
         from markitdown import MarkItDown
-        md = MarkItDown()
+        from openai import Client as OpenAIClient
+        import re
+        from langchain_text_splitters import MarkdownHeaderTextSplitter
+
+        # Configure OCR client
+        llm_client = None
+        llm_model = None
+        if settings.llm_provider == "gemini" and settings.google_api_key:
+            llm_client = OpenAIClient(
+                base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+                api_key=settings.google_api_key,
+            )
+            llm_model = settings.gemini_model
+        elif settings.llm_provider == "vllm" and settings.vllm_api_base:
+            llm_client = OpenAIClient(
+                base_url=settings.vllm_api_base,
+                api_key=settings.vllm_api_key,
+            )
+            llm_model = settings.hf_model
+
+        if llm_client and llm_model:
+            md = MarkItDown(llm_client=llm_client, llm_model=llm_model)
+        else:
+            md = MarkItDown()
+
         result = md.convert(str(path))
         markdown_text = result.text_content
 
@@ -43,25 +67,62 @@ def _load_with_markitdown(path: Path):
             logger.warning("MarkItDown produced empty output for %s, falling back to PyPDF.", path.name)
             return _load_pdf_fallback(path, doc_id)
 
+        # Pre-process DOCX bold pseudo-headings: lines with just **text** -> # text
+        markdown_text = re.sub(r'^\s*\*\*(.+?)\*\*\s*$', r'# \1', markdown_text, flags=re.MULTILINE)
+
         # MarkItDown returns single text block — split into pages by page breaks or sections
         # For PDFs, we try to detect page boundaries
         pages = _split_into_pages(markdown_text, path.name)
 
         documents = []
+        
+        # Setup Markdown header splitter
+        headers_to_split_on = [
+            ("#", "Header 1"),
+            ("##", "Header 2"),
+            ("###", "Header 3"),
+            ("####", "Header 4"),
+        ]
+        markdown_splitter = MarkdownHeaderTextSplitter(
+            headers_to_split_on=headers_to_split_on,
+            strip_headers=False
+        )
+
         for page_num, page_text in enumerate(pages, start=1):
             if page_text.strip():
-                documents.append(Document(
-                    page_content=page_text,
-                    metadata={
-                        "document_id": doc_id,
-                        "filename": path.name,
-                        "source": str(path.resolve()),
-                        "page": page_num,
-                        "section": None,
-                    },
-                ))
+                try:
+                    sub_docs = markdown_splitter.split_text(page_text)
+                    if not sub_docs:
+                        raise ValueError("Empty split")
+                    for sub_doc in sub_docs:
+                        # Extract the most specific header as the section
+                        section_name = sub_doc.metadata.get("Header 4") or sub_doc.metadata.get("Header 3") or sub_doc.metadata.get("Header 2") or sub_doc.metadata.get("Header 1")
+                        
+                        documents.append(Document(
+                            page_content=sub_doc.page_content,
+                            metadata={
+                                "document_id": doc_id,
+                                "filename": path.name,
+                                "source": str(path.resolve()),
+                                "page": page_num,
+                                "section": section_name,
+                            },
+                        ))
+                except Exception as ex:
+                    # Fallback to entire page if splitter fails
+                    logger.warning(f"MarkdownHeaderTextSplitter failed on page {page_num}: {ex}")
+                    documents.append(Document(
+                        page_content=page_text,
+                        metadata={
+                            "document_id": doc_id,
+                            "filename": path.name,
+                            "source": str(path.resolve()),
+                            "page": page_num,
+                            "section": None,
+                        },
+                    ))
 
-        logger.info("MarkItDown parsed %s: %d pages.", path.name, len(documents))
+        logger.info("MarkItDown parsed %s: %d pages/sections.", path.name, len(documents))
         return documents
 
     except Exception as exc:
@@ -75,6 +136,12 @@ def _split_into_pages(text: str, filename: str):
     Tries page break markers first, then falls back to section headers.
     """
     import re
+
+    # Check for PowerPoint slide markers from MarkItDown
+    slide_break_pattern = r'\n*(?=<!-- Slide number: \d+ -->)\n*'
+    parts = re.split(slide_break_pattern, text, flags=re.IGNORECASE)
+    if len(parts) > 1:
+        return [p for p in parts if p.strip()]
 
     # Check for page break markers (common in PDF conversions)
     page_break_pattern = r'\n-{3,}\s*(?:page\s*\d+|trang\s*\d+)?\s*-{3,}\n'
@@ -121,7 +188,7 @@ def _splitter(chunk_size=None, chunk_overlap=None):
     )
 
 
-def build_chunks(file_paths, chunk_size=None, chunk_overlap=None, chunker=None):
+def build_chunks(file_paths, notebook_id=None, chunk_size=None, chunk_overlap=None, chunker=None):
     """Parse files and split into chunks."""
     page_docs = []
     for path in file_paths:
@@ -139,6 +206,7 @@ def build_chunks(file_paths, chunk_size=None, chunk_overlap=None, chunker=None):
 
         meta = ChunkMetadata(
             document_id=doc_id,
+            notebook_id=notebook_id,
             filename=chunk.metadata["filename"],
             source=chunk.metadata["source"],
             page=chunk.metadata["page"],
@@ -150,7 +218,7 @@ def build_chunks(file_paths, chunk_size=None, chunk_overlap=None, chunker=None):
     return chunks
 
 
-def _build_bm25_from_chunks(chunks):
+def _build_bm25_from_chunks(chunks, notebook_id):
     """Build BM25 index from LangChain Document chunks."""
     bm25_docs = [
         BM25Document(
@@ -160,7 +228,7 @@ def _build_bm25_from_chunks(chunks):
         )
         for c in chunks
     ]
-    bm25_index = get_bm25_index()
+    bm25_index = get_bm25_index(notebook_id)
     bm25_index.build(bm25_docs)
     bm25_index.save()
     logger.info("BM25 index built and persisted: %d documents.", len(bm25_docs))
@@ -207,7 +275,7 @@ def ingest(recreate=False, collection_name=None, chunker=None, chunk_size=None, 
     count = index_chunks(chunks, collection_name=collection_name)
 
     # Build BM25 index
-    _build_bm25_from_chunks(chunks)
+    _build_bm25_from_chunks(chunks, "default")
 
     # Record metrics
     from src.observability import record_chunks_indexed
@@ -217,15 +285,59 @@ def ingest(recreate=False, collection_name=None, chunker=None, chunk_size=None, 
     return count
 
 
-def save_and_ingest_file(file_bytes, filename):
+def save_and_ingest_file(file_bytes, filename, notebook_id):
     """Save an uploaded file and ingest it."""
+    import re
+    import time
+    
     safe_name = Path(filename).name
+    
+    # Đổi tên tự động nếu file có tên chung chung do copy-paste (image.png, image.jpg)
+    if re.match(r'^image\.(png|jpg|jpeg)$', safe_name, re.IGNORECASE):
+        p = Path(safe_name)
+        safe_name = f"clipboard_{int(time.time())}{p.suffix}"
+        
     dest = settings.data_dir / safe_name
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     dest.write_bytes(file_bytes)
 
     ensure_collection(recreate=False)
-    chunks = build_chunks([dest])
+    chunks = build_chunks([dest], notebook_id=notebook_id)
+
+    # Chặn Race Condition: Kiểm tra xem Notebook có bị user xóa trong lúc đang xử lý không
+    from src.notebook_store import get_notebook_store
+    nb = get_notebook_store().get_notebook(notebook_id)
+    if not nb:
+        logger.warning("Notebook %s bị xóa trong quá trình xử lý file %s. Tự hủy tiến trình.", notebook_id, filename)
+        return {"filename": safe_name, "chunks_indexed": 0}
+
+    # Dọn dẹp dữ liệu cũ nếu re-upload trùng tên file (Tránh lỗi nhân bản rác Qdrant & BM25)
+    for doc in nb.documents:
+        if doc.filename == safe_name:
+            logger.info("Phát hiện nạp lại file trùng tên %s, dọn dẹp bản cũ...", safe_name)
+            # Dọn Qdrant
+            from src.store import get_client
+            from qdrant_client.http import models
+            try:
+                get_client().delete(
+                    collection_name=settings.qdrant_collection,
+                    points_selector=models.Filter(
+                        must=[
+                            models.FieldCondition(key="filename", match=models.MatchValue(value=safe_name)),
+                            models.FieldCondition(key="document_id", match=models.MatchValue(value=notebook_id))
+                        ]
+                    )
+                )
+            except Exception as e:
+                logger.error("Lỗi xóa Qdrant cũ: %s", e)
+            
+            # Dọn BM25
+            try:
+                idx = get_bm25_index(notebook_id)
+                idx.remove_document(safe_name)
+            except Exception as e:
+                logger.error("Lỗi xóa BM25 cũ: %s", e)
+            break
 
     # Index into Qdrant
     indexed = index_chunks(chunks)
@@ -235,7 +347,7 @@ def save_and_ingest_file(file_bytes, filename):
         BM25Document(chunk_id=c.metadata["chunk_id"], text=c.page_content, metadata=c.metadata)
         for c in chunks
     ]
-    bm25_index = get_bm25_index()
+    bm25_index = get_bm25_index(notebook_id)
     bm25_index.add_documents(bm25_docs)
     bm25_index.save()
 

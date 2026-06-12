@@ -1,0 +1,1278 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <title>Pipeline Viewer — Simple NotebookLM v2.0</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #0f0f1a;
+            color: #e0e0e0;
+        }
+        .top-bar {
+            position: sticky; top: 0; z-index: 100;
+            background: rgba(15,15,26,0.97);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+            padding: 12px 24px;
+            display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;
+        }
+        .top-bar h1 {
+            font-size: 18px;
+            background: linear-gradient(135deg, #60a5fa, #a78bfa, #f472b6);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        }
+        .hint-text { font-size: 13px; color: #94a3b8; }
+        .hint-text kbd {
+            background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 4px; padding: 2px 7px; font-size: 12px; color: #e0e0e0;
+        }
+        .nav {
+            display: flex; gap: 6px; padding: 0 24px 12px;
+            background: rgba(15,15,26,0.97); position: sticky; top: 52px; z-index: 99; flex-wrap: wrap;
+        }
+        .nav a {
+            padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 500;
+            color: #94a3b8; text-decoration: none; border: 1px solid rgba(255,255,255,0.08); transition: all 0.2s;
+        }
+        .nav a:hover { background: rgba(96,165,250,0.15); color: #60a5fa; border-color: rgba(96,165,250,0.3); }
+        section {
+            padding: 40px 24px 60px;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+        section h2 { font-size: 22px; margin-bottom: 24px; padding-bottom: 12px; border-bottom: 2px solid rgba(96,165,250,0.3); }
+        .mermaid {
+            display: flex; justify-content: center;
+            background: rgba(255,255,255,0.02);
+            border-radius: 16px; border: 1px solid rgba(255,255,255,0.06);
+            padding: 40px 20px; overflow: visible;
+        }
+        .mermaid svg { max-width: none !important; width: auto !important; min-width: 900px; }
+
+        /* Clickable nodes */
+        .mermaid .node { cursor: pointer; }
+        .mermaid .node:hover rect,
+        .mermaid .node:hover polygon,
+        .mermaid .node:hover circle,
+        .mermaid .node:hover .label-container {
+            filter: brightness(1.35) drop-shadow(0 0 8px rgba(96,165,250,0.5));
+            transition: filter 0.15s;
+        }
+
+        /* ── Modal ── */
+        .modal-overlay {
+            display: none; position: fixed; inset: 0;
+            background: rgba(0,0,0,0.65); backdrop-filter: blur(6px);
+            z-index: 1000; justify-content: center; align-items: center;
+            animation: fadeIn 0.15s;
+        }
+        .modal-overlay.show { display: flex; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+        .modal {
+            background: linear-gradient(145deg, #1a1a30, #141425);
+            border: 1px solid rgba(96,165,250,0.25);
+            border-radius: 20px;
+            padding: 0;
+            max-width: 620px; width: 92%;
+            max-height: 85vh;
+            overflow: hidden;
+            box-shadow: 0 25px 60px rgba(0,0,0,0.5), 0 0 40px rgba(96,165,250,0.08);
+            animation: slideUp 0.2s;
+        }
+        .modal-header {
+            padding: 20px 24px 16px;
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+            display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+        }
+        .modal-header .icon { font-size: 28px; flex-shrink: 0; }
+        .modal-header .title-area { flex: 1; }
+        .modal-header h3 { font-size: 17px; font-weight: 600; color: #f0f0f0; margin-bottom: 4px; }
+        .modal-header .layer-tag {
+            display: inline-block; font-size: 11px; font-weight: 500;
+            padding: 3px 10px; border-radius: 20px;
+            background: rgba(96,165,250,0.15); color: #60a5fa;
+            border: 1px solid rgba(96,165,250,0.25);
+        }
+        .modal-close {
+            background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+            color: #94a3b8; width: 32px; height: 32px; border-radius: 8px;
+            font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+            transition: all 0.15s; flex-shrink: 0;
+        }
+        .modal-close:hover { background: rgba(239,68,68,0.2); color: #f87171; border-color: rgba(239,68,68,0.3); }
+
+        .modal-body {
+            padding: 20px 24px 24px;
+            overflow-y: auto; max-height: calc(85vh - 80px);
+        }
+        .modal-body .desc { font-size: 14px; line-height: 1.7; color: #c0c0d0; margin-bottom: 16px; }
+
+        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+        .info-card {
+            background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.07);
+            border-radius: 12px; padding: 14px;
+        }
+        .info-card .label { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; }
+        .info-card .value { font-size: 13px; color: #e0e0e0; font-weight: 500; }
+        .info-card.full { grid-column: 1 / -1; }
+
+        .why-card {
+            background: rgba(245,158,11,0.08); border-left: 3px solid rgba(245,158,11,0.6);
+            padding: 12px 16px; border-radius: 6px; margin-bottom: 16px; font-size: 13.5px; color: #fcd34d; line-height: 1.6;
+        }
+        .why-card .why-title { font-weight: 600; margin-bottom: 4px; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px; opacity: 0.8; }
+        .func-list { list-style: none; margin: 0; padding: 0; }
+        .func-list li {
+            padding: 8px 12px; margin-bottom: 4px;
+            background: rgba(96,165,250,0.06); border-radius: 8px;
+            font-size: 13px; color: #c0c0d0;
+            border-left: 3px solid rgba(96,165,250,0.4);
+        }
+        .func-list li code {
+            color: #a78bfa; font-family: 'Consolas', 'Fira Code', monospace; font-size: 12px;
+            background: rgba(167,139,250,0.1); padding: 1px 6px; border-radius: 4px;
+        }
+        .file-link {
+            display: inline-block; margin-top: 10px; padding: 6px 14px;
+            background: rgba(167,139,250,0.1); border: 1px solid rgba(167,139,250,0.25);
+            border-radius: 8px; color: #a78bfa; font-size: 12px; font-weight: 500;
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+
+<div class="top-bar">
+    <h1>📓 Simple NotebookLM v2.0 — Pipeline</h1>
+    <span class="hint-text">👆 Click vào ô để xem chi tiết &nbsp;|&nbsp; Zoom: <kbd>Ctrl</kbd> + cuộn chuột</span>
+</div>
+<div class="nav">
+    <a href="#arch">🏗️ Kiến trúc tổng quan</a>
+    <a href="#ingest">📥 A · Nạp dữ liệu</a>
+    <a href="#qa">🧠 B · Hỏi đáp RAG</a>
+    <a href="#learn">📚 C · Học tập</a>
+    <a href="#ops">📊 D · Giám sát</a>
+    <a href="#seq">🔗 Sequence E2E</a>
+</div>
+
+<!-- Modal -->
+<div class="modal-overlay" id="modalOverlay">
+    <div class="modal">
+        <div class="modal-header">
+            <span class="icon" id="modalIcon">📦</span>
+            <div class="title-area">
+                <h3 id="modalTitle">Component</h3>
+                <span class="layer-tag" id="modalLayer">Tầng 1</span>
+            </div>
+            <button class="modal-close" id="modalClose">✕</button>
+        </div>
+        <div class="modal-body" id="modalBody"></div>
+    </div>
+</div>
+
+<section id="arch">
+    <h2>🏗️ Tổng Quan Kiến Trúc (6 Tầng) — Click vào ô để xem chi tiết</h2>
+    <pre class="mermaid">
+graph TB
+    subgraph T1["🖥️ Tầng 1 · Giao diện"]
+        User(["👤 Người dùng"])
+        Streamlit["Streamlit Web UI\nGlassmorphism Dark Theme\nWorkspace Isolation"]
+        FastAPI["FastAPI Backend\nREST API + SSE Stream"]
+        CLI["Typer CLI\nCommand-line"]
+    end
+
+    subgraph T2["⚙️ Tầng 2 · MLOps"]
+        Redis[("Redis Semantic Cache\n~0.1s response")]
+        Session[("Session Memory\nChat History")]
+        Prometheus["Prometheus Metrics"]
+        LangSmith["LangSmith Tracing"]
+    end
+
+    subgraph T3["📥 Tầng 3 · Xử lý Dữ liệu"]
+        Worker["Background Worker"]
+        Parser["MarkItDown Parser\nPDF/DOCX/PPTX/XLSX/HTML/OCR"]
+        Chunker["Recursive Splitter\n1000 chars / 150 overlap"]
+        Embedder["GreenNode Embedding\nVN-Mixed-V1"]
+    end
+
+    subgraph T4["💾 Tầng 4 · Kho Tri thức"]
+        Qdrant[("Qdrant Vector DB")]
+        BM25[("RankBM25\nInverted Index")]
+    end
+
+    subgraph T5["🔍 Tầng 5 · Truy xuất"]
+        Router{"Scope Router"}
+        HybridSearch["Hybrid Search\nVector + Keyword\nRRF Merge"]
+        Reranker["Cross-Encoder\nbge-reranker-v2-m3\n15 → 5 chunks"]
+        Scroll["Scroll All Chunks"]
+        ContextBuilder["Context Builder\n[S1]..[SN]"]
+    end
+
+    subgraph T6["🤖 Tầng 6 · Tạo sinh"]
+        Jinja["Jinja2 Templates"]
+        MapReduce["Map-Reduce"]
+        LLMFactory{"LLM Factory"}
+        Gemini["Gemini API"]
+        HFLocal["HuggingFace"]
+        vLLM["vLLM"]
+        GGUF["GGUF"]
+        StreamBatch["Stream Batching\n50ms → SSE"]
+        Pydantic["Pydantic\nJSON Validate"]
+    end
+
+    User -->|1. Tương tác| Streamlit & CLI
+    Streamlit <-->|2. Gọi REST/SSE| FastAPI
+    CLI -->|2. Gọi lệnh| FastAPI
+    FastAPI -->|3. Check Cache| Redis
+    FastAPI -->|3. Lấy Session| Session
+    FastAPI -.->|Ghi metrics/logs| Prometheus & LangSmith
+    FastAPI -->|A1. Upload file| Worker -->|A2. Parse| Parser -->|A3. Chia nhỏ| Chunker
+    Chunker -->|A4| Embedder -->|A5. Vectors| Qdrant
+    Chunker -->|A4| BM25
+    Redis -->|B1. Cache Miss| Router
+    Router -->|B2. HYBRID| HybridSearch
+    Router -->|"B2. SCROLL (Hỏi đáp)"| Scroll
+    Router -->|"C1. SCROLL (Học tập)"| Scroll
+    HybridSearch -->|B3| Qdrant & BM25
+    HybridSearch -->|B4| Reranker -->|B5| ContextBuilder
+    Scroll -->|"B3. Gắn nhãn S1"| ContextBuilder
+    ContextBuilder -->|"B6. Q&A Prompt"| Jinja
+    Scroll -->|"C2. Summary dài"| MapReduce -->|C3| Jinja
+    Scroll -->|"C2. Ngắn/Quiz/Flashcard"| Jinja
+    Jinja -->|D1. Chạy LLM| LLMFactory -->|D2| Gemini & HFLocal & vLLM & GGUF
+    Gemini & HFLocal & vLLM & GGUF -->|D3. Stream| StreamBatch -->|D4| FastAPI
+    Gemini & HFLocal & vLLM & GGUF -->|D3. Block| Pydantic -->|D4| FastAPI
+    </pre>
+</section>
+
+<section id="ingest">
+    <h2>📥 Pipeline A · Nạp Dữ Liệu (Document Ingestion)</h2>
+    <pre class="mermaid">
+flowchart LR
+    Upload["📄 Upload file\nPDF / DOCX / PPTX\nXLSX / HTML / Image"]
+    API["POST /upload\nTrả task_id\nngay lập tức"]
+    Worker2["Background\nWorker"]
+    Parse["MarkItDown\nParser"]
+    Chunk["Recursive\nChunker"]
+    Embed["SentenceTransformer\nGreenNode Embedding"]
+    Token["BM25 Tokenizer"]
+    QStore[("Qdrant DB\nupsert")]
+    BStore[("RankBM25\nRAM Index")]
+    Status["Task Tracker\nGET /upload/status"]
+
+    Upload -->|1| API -->|2| Worker2 -->|3| Parse -->|4| Chunk
+    Chunk -->|5| Embed -->|6| QStore
+    Chunk -->|5| Token -->|6| BStore
+    Worker2 -.->|Theo dõi| Status
+    </pre>
+</section>
+
+<section id="qa">
+    <h2>🧠 Pipeline B · Hỏi Đáp RAG — 10 Bước</h2>
+    <pre class="mermaid">
+flowchart TB
+    Q["❓ Câu hỏi người dùng"]
+
+    subgraph B1["Bước 1 · Cache"]
+        CacheGet{"Redis\nSemantic Cache"}
+        CacheHit["✅ Cache HIT\n~0.1s"]
+    end
+
+    subgraph B2["Bước 2 · Session"]
+        SessionGet["Lấy lịch sử\nhội thoại"]
+    end
+
+    subgraph B3["Bước 3 · Router"]
+        Router2{"Scope Router"}
+    end
+
+    subgraph B4["Bước 4 · Hybrid Search"]
+        VSearch["Qdrant\nSemantic Search"]
+        KSearch["BM25\nKeyword Search"]
+        RRF["RRF Merge\n→ 15 chunks"]
+    end
+
+    subgraph B5["Bước 5 · Rerank"]
+        Rerank["Cross-Encoder\n15 → 5 chunks"]
+    end
+
+    subgraph B6["Bước 6 · Context"]
+        CB["Context Builder\n[S1]..[SN]"]
+    end
+
+    subgraph B7["Bước 7 · Prompt"]
+        Template["answer.jinja2"]
+    end
+
+    subgraph B8["Bước 8 · LLM"]
+        LLM2{"LLM Factory"}
+        G["Gemini"]
+        H["HuggingFace"]
+        V["vLLM"]
+        GG["GGUF"]
+    end
+
+    subgraph B9["Bước 9 · Output"]
+        Stream["Stream\nBatcher 50ms"]
+        Block["Full JSON"]
+    end
+
+    subgraph B10["Bước 10"]
+        Save["Cache + Session\n+ Metrics"]
+    end
+
+    Q -->|1| CacheGet
+    CacheGet -->|2. HIT| CacheHit
+    CacheGet -->|2. MISS| SessionGet -->|3| Router2
+    Router2 -->|4. HYBRID| VSearch & KSearch
+    VSearch & KSearch -->|5| RRF
+    RRF -->|6| Rerank -->|7| CB
+    Router2 -->|"4. SCROLL (Hỏi đáp toàn thư)"| CB
+    CB -->|8| Template -->|9| LLM2
+    LLM2 -->|10| G & H & V & GG
+    G & H & V & GG -->|11| Stream & Block
+    Stream & Block -->|12| Save
+    </pre>
+</section>
+
+<section id="learn">
+    <h2>📚 Pipeline C · Học Tập (Summary / Quiz / Flashcards)</h2>
+    <pre class="mermaid">
+flowchart TB
+    Req["📚 Yêu cầu học tập"]
+    Resolve["_resolve_target()\nCó query? → retrieve()\nKhông query? → fetch_all_chunks()"]
+    Scroll2["Qdrant Scroll\nLấy toàn bộ chunks"]
+
+    subgraph SUM["📝 Tóm tắt — summarize()"]
+        Check{"len chunks\n≤ batch_size?"}
+        Single["render_prompt\nsummary_single.jinja2\nchunks → LLM trực tiếp"]
+        Batch["Chia chunks thành batches\n~summarize_batch_size"]
+        M1["Batch 1 → summary_map.jinja2\n→ LLM → sub-summary"]
+        M2["Batch 2 → summary_map.jinja2\n→ LLM → sub-summary"]
+        MN["Batch N → summary_map.jinja2\n→ LLM → sub-summary"]
+        Collect["Thu thập\nsub-summaries"]
+        Reduce["summary_reduce.jinja2\npartials → LLM\n→ Tóm tắt cuối"]
+    end
+
+    subgraph QZ["🎯 Quiz — generate_quiz()"]
+        QPrompt["render_prompt\nquiz.jinja2\nchunks trực tiếp → LLM"]
+        QParse["_parse_json()\nTrích JSON từ LLM output"]
+        QVal["_validate_items()\nPydantic QuizItem[]\nDedup + filter"]
+    end
+
+    subgraph FL["🃏 Flashcards — generate_flashcards()"]
+        FPrompt["render_prompt\nflashcards.jinja2\nchunks trực tiếp → LLM"]
+        FParse["_parse_json()\nTrích JSON từ LLM output"]
+        FVal["_validate_items()\nPydantic FlashcardItem[]\nDedup + filter"]
+    end
+
+    Citations["format_citations()\nGắn S1..SN\nPost-processing cuối"]
+    Export["Export\nMD / JSON / CSV"]
+
+    Req -->|1| Resolve -->|2| Scroll2
+    Scroll2 -->|"3. chunks"| Check
+    Check -->|"4. Ngắn"| Single
+    Check -->|"4. Dài"| Batch -->|5| M1 & M2 & MN -->|6| Collect -->|7| Reduce
+    Single -->|8| Citations
+    Reduce -->|8| Citations
+    Scroll2 -->|"3. chunks"| QPrompt -->|4| QParse -->|5| QVal -->|6| Citations
+    Scroll2 -->|"3. chunks"| FPrompt -->|4| FParse -->|5| FVal -->|6| Citations
+    Citations -->|Cuối| Export
+    </pre>
+</section>
+
+<section id="ops">
+    <h2>📊 Pipeline D · Giám sát & MLOps</h2>
+    <pre class="mermaid">
+flowchart LR
+    subgraph SRC["Nguồn"]
+        A["Q&A /ask"]
+        B["Learning"]
+        C["Upload"]
+        D["Feedback"]
+    end
+
+    subgraph PROM["Prometheus"]
+        C1["requests_total"]
+        C2["duration_seconds"]
+        C3["cache_hits"]
+        C4["cache_misses"]
+        C5["chunks_indexed"]
+        C6["active_tasks"]
+        C7["feedback_total"]
+    end
+
+    subgraph TRACE["LangSmith"]
+        T1S["trace_run"]
+        T2S["Nested Spans"]
+    end
+
+    subgraph FB["Feedback"]
+        F1["👍 / 👎"]
+        F2["Storage"]
+    end
+
+    EP["GET /metrics"]
+
+    A & B -->|1| C1 & C2
+    A -->|2| C3 & C4
+    C -->|3| C5 & C6
+    D -->|4| C7
+    A & B -.->|Trace| T1S --> T2S
+    D -->|Feedback| F1 --> F2
+    C1 & C2 & C3 & C4 & C5 & C6 & C7 --> EP
+    </pre>
+</section>
+
+<section id="seq">
+    <h2>🔗 Sequence Diagram End-to-End</h2>
+    <pre class="mermaid">
+sequenceDiagram
+    actor User as 👤 Người dùng
+    participant UI as 🖥️ Streamlit
+    participant API as ⚡ FastAPI
+    participant Cache as 💾 Redis
+    participant Qdrant as 📦 Qdrant
+    participant BM25 as 📝 BM25
+    participant Reranker as ⚖️ Reranker
+    participant LLM as 🤖 LLM
+
+    rect rgb(20, 60, 40)
+    Note over User,LLM: 📥 NẠP DỮ LIỆU
+    User->>UI: Upload tài liệu
+    UI->>API: POST /upload
+    API-->>UI: task_id
+    par Dual Index
+        API->>Qdrant: Embed + Upsert
+    and
+        API->>BM25: Tokenize + Add
+    end
+    end
+
+    rect rgb(13, 59, 102)
+    Note over User,LLM: 🧠 HỎI ĐÁP RAG
+    User->>UI: Đặt câu hỏi
+    UI->>API: POST /ask/stream
+    API->>Cache: cache.get(hash)
+    alt Cache HIT
+        Cache-->>API: Cached answer
+    else Cache MISS
+        par Song song
+            API->>Qdrant: Semantic
+        and
+            API->>BM25: Keyword
+        end
+        Note over API: RRF → 15 chunks
+        API->>Reranker: Rerank
+        Note over Reranker: 15 → 5
+        API->>LLM: Prompt
+        loop 50ms
+            LLM-->>UI: SSE stream
+        end
+        API->>Cache: Lưu cache
+    end
+    end
+
+    rect rgb(45, 27, 105)
+    Note over User,LLM: 📚 HỌC TẬP
+    User->>UI: Quiz request
+    API->>Qdrant: Scroll all
+    API->>LLM: quiz.jinja2
+    LLM-->>UI: QuizSet JSON
+    end
+    </pre>
+</section>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+// ── Node detail database ──
+const nodeInfo = {
+    // === Tầng 1: Giao diện ===
+    User: {why: "Người dùng là điểm xuất phát, xác định yêu cầu hệ thống.", 
+        icon: "👤", title: "Người dùng", layer: "Tầng 1 · Giao diện",
+        desc: "Người dùng tương tác với hệ thống qua 3 giao diện: Streamlit Web UI (chính), FastAPI REST API, hoặc Typer CLI.",
+        details: [
+            {label:"Hành động chính", value:"Upload tài liệu, Hỏi đáp, Tạo Quiz/Flashcard, Tóm tắt"},
+            {label:"Giao diện", value:"Web UI (Streamlit) / REST API / CLI"},
+        ],
+        funcs: [
+            "Upload file PDF, DOCX, PPTX, XLSX, HTML, ảnh",
+            "Hỏi đáp grounded với trích dẫn [S1] [S2]",
+            "Tạo Quiz trắc nghiệm tương tác",
+            "Tạo Flashcard học tập",
+            "Tóm tắt tài liệu (Map-Reduce)",
+            "Feedback 👍👎 cho câu trả lời"
+        ]
+    },
+    Streamlit: {why: "Cung cấp giao diện trực quan, thân thiện cho end-user thao tác mà không cần biết code.", 
+        icon: "🖥️", title: "Streamlit Web UI", layer: "Tầng 1 · Giao diện", file: "src/interfaces/ui.py",
+        desc: "Giao diện web chính với thiết kế Glassmorphism Dark Theme. Hỗ trợ đa workspace, upload file, chat streaming SSE, quiz tương tác, flashcard lật.",
+        details: [
+            {label:"File", value:"src/interfaces/ui.py (514 dòng)"},
+            {label:"CSS Theme", value:"src/interfaces/styles.py"},
+            {label:"Framework", value:"Streamlit"},
+            {label:"Giao tiếp", value:"HTTP calls tới FastAPI backend"},
+        ],
+        funcs: [
+            "Landing page → Dashboard (notebook grid) → Notebook view",
+            "4 tabs: Chat, Summary, Quiz, Flashcards",
+            "File upload với cảnh báo privacy (Cloud vs Local AI)",
+            "SSE streaming chat — hiển thị token real-time",
+            "Quiz tương tác với chấm điểm tự động",
+            "Flashcard carousel với hiệu ứng lật",
+            "Chuyển đổi LLM provider (Gemini ↔ Local)"
+        ]
+    },
+    FastAPI: {why: "Tách biệt logic backend và frontend, hỗ trợ xử lý luồng (streaming) và tác vụ nặng hiệu quả.", 
+        icon: "⚡", title: "FastAPI Backend", layer: "Tầng 1 · Giao diện", file: "src/interfaces/api.py",
+        desc: "Backend REST API chính với 15+ endpoints. Hỗ trợ Server-Sent Events (SSE) cho streaming response. Preload models khi khởi động.",
+        details: [
+            {label:"File", value:"src/interfaces/api.py (434 dòng)"},
+            {label:"Framework", value:"FastAPI + Uvicorn"},
+            {label:"Streaming", value:"SSE via StreamingResponse"},
+            {label:"Port mặc định", value:"8000"},
+        ],
+        funcs: [
+            "<code>POST /upload/{notebook_id}</code> — Upload file async",
+            "<code>GET /upload/status/{task_id}</code> — Kiểm tra tiến trình",
+            "<code>POST /ask</code> — Hỏi đáp sync (full response)",
+            "<code>POST /ask/stream</code> — Hỏi đáp streaming SSE",
+            "<code>POST /summarize</code> — Tóm tắt Map-Reduce",
+            "<code>POST /quiz</code> — Sinh quiz trắc nghiệm",
+            "<code>POST /flashcards</code> — Sinh flashcards",
+            "<code>GET /health</code> — Health check",
+            "<code>GET /metrics</code> — Prometheus metrics",
+            "<code>POST /feedback</code> — Thumbs up/down"
+        ]
+    },
+    CLI: {why: "Tiện lợi cho dev/admin thực thi các lệnh quản trị, cronjob, tự động hóa từ terminal.", 
+        icon: "⌨️", title: "Typer CLI", layer: "Tầng 1 · Giao diện", file: "src/interfaces/cli.py",
+        desc: "Giao diện command-line dùng Typer framework. Cho phép tự động hóa mà không cần web server.",
+        details: [
+            {label:"File", value:"src/interfaces/cli.py (133 dòng)"},
+            {label:"Framework", value:"Typer"},
+        ],
+        funcs: [
+            "<code>python -m src.interfaces.cli ingest</code> — Index toàn bộ tài liệu",
+            "<code>cli ask \"câu hỏi\"</code> — Hỏi đáp qua terminal",
+            "<code>cli debug-retrieval</code> — Debug retrieval pipeline",
+            "<code>cli summarize --fmt md</code> — Tóm tắt xuất markdown",
+            "<code>cli quiz --count 5</code> — Sinh 5 câu quiz",
+            "<code>cli flashcards --count 8</code> — Sinh 8 flashcard",
+            "<code>cli cache-clear</code> — Xóa Redis cache"
+        ]
+    },
+
+    // === Tầng 2: MLOps ===
+    Redis: {why: "Cache giúp trả lời các câu hỏi trùng lặp trong <0.1s, tiết kiệm API cost và tăng tốc đáng kể.", 
+        icon: "💾", title: "Redis Semantic Cache", layer: "Tầng 2 · MLOps", file: "src/cache.py",
+        desc: "Cache câu trả lời dựa trên SHA256 hash của query đã normalize. Giúp trả lời gần như tức thì (~0.1s) cho câu hỏi trùng/tương tự. Tự graceful fallback nếu Redis không khả dụng.",
+        details: [
+            {label:"File", value:"src/cache.py"},
+            {label:"Cơ chế", value:"SHA256 hash(normalize(query)) → Redis key"},
+            {label:"Tốc độ", value:"~0.1s cho cache hit"},
+            {label:"Fallback", value:"Bỏ qua cache nếu Redis unavailable"},
+            {label:"Docker", value:"docker compose up -d (port 6379)"},
+        ],
+        funcs: [
+            "<code>SemanticCache.get(query)</code> — Kiểm tra cache bằng hash",
+            "<code>SemanticCache.put(query, response)</code> — Lưu kết quả",
+            "<code>SemanticCache.invalidate(query)</code> — Xóa 1 entry",
+            "<code>SemanticCache.flush_all()</code> — Xóa toàn bộ cache"
+        ]
+    },
+    Session: {why: "Cung cấp ngữ cảnh ngắn hạn (history) để LLM hiểu đại từ (nó, đó) từ câu trước.", 
+        icon: "🧠", title: "Session Memory", layer: "Tầng 2 · MLOps", file: "src/session.py",
+        desc: "Lưu lịch sử hội thoại ngắn hạn theo session_id. In-memory dict, tự động trim khi quá dài. Format thành context string cho prompt.",
+        details: [
+            {label:"File", value:"src/session.py"},
+            {label:"Lưu trữ", value:"In-memory dict (không persist)"},
+            {label:"Format", value:"\"Người dùng: .../Trợ lý: ...\""},
+            {label:"Auto-trim", value:"Giữ N tin nhắn gần nhất"},
+        ],
+        funcs: [
+            "<code>SessionStore.get(session_id)</code> — Lấy session",
+            "<code>Session.add(role, content)</code> — Thêm tin nhắn",
+            "<code>Session.to_context_string()</code> — Format cho prompt",
+            "<code>SessionStore.cleanup()</code> — Dọn session cũ"
+        ]
+    },
+    Prometheus: {why: "Giám sát hiệu năng hệ thống (latency, load) để phát hiện sớm các vấn đề bottleneck.", 
+        icon: "📊", title: "Prometheus Metrics", layer: "Tầng 2 · MLOps", file: "src/observability.py",
+        desc: "Thu thập metrics định lượng: tổng request, latency, cache hit/miss, chunks đã index, feedback. Expose qua /metrics endpoint.",
+        details: [
+            {label:"File", value:"src/observability.py"},
+            {label:"Endpoint", value:"GET /metrics"},
+        ],
+        funcs: [
+            "<code>rag_requests_total</code> — Counter tổng request",
+            "<code>rag_request_duration_seconds</code> — Histogram latency",
+            "<code>rag_cache_hits_total</code> / <code>cache_misses_total</code>",
+            "<code>rag_chunks_indexed_total</code> — Counter chunks đã index",
+            "<code>rag_active_background_tasks</code> — Gauge tasks đang chạy",
+            "<code>@track_latency(endpoint)</code> — Decorator tự động đo"
+        ]
+    },
+    LangSmith: {why: "Trace chi tiết luồng xử lý RAG để debug LLM prompt và pipeline lỗi ở đâu.", 
+        icon: "🔍", title: "LangSmith Tracing", layer: "Tầng 2 · MLOps", file: "src/observability.py",
+        desc: "Distributed tracing tùy chọn qua LangSmith. Ghi lại nested spans: Chain → Retrieval → Embedding → BM25 → Reranking → LLM. Bật/tắt qua ENABLE_TRACING.",
+        details: [
+            {label:"File", value:"src/observability.py"},
+            {label:"Toggle", value:"ENABLE_TRACING=true/false trong .env"},
+            {label:"Spans", value:"Chain → Retrieval → Reranking → LLM"},
+        ],
+        funcs: [
+            "<code>trace_run(name)</code> — Context manager tạo span",
+            "Ghi lại input/output mỗi bước",
+            "Tích hợp LangSmith dashboard"
+        ]
+    },
+
+    // === Tầng 3: Xử lý Dữ liệu ===
+    Worker: {why: "Giúp API không bị nghẽn (timeout) khi người dùng upload file quá lớn (ví dụ: PDF 500 trang).", 
+        icon: "⚙️", title: "Background Worker", layer: "Tầng 3 · Xử lý Dữ liệu", file: "src/worker.py",
+        desc: "Xử lý file upload async bằng FastAPI BackgroundTasks. Trả task_id ngay lập tức, theo dõi trạng thái trong in-memory dict.",
+        details: [
+            {label:"File", value:"src/worker.py"},
+            {label:"Cơ chế", value:"FastAPI BackgroundTasks"},
+            {label:"Tracking", value:"TaskTracker — in-memory dict"},
+            {label:"Trạng thái", value:"pending → processing → done / error"},
+        ],
+        funcs: [
+            "<code>process_file_background()</code> — Gọi indexing pipeline",
+            "<code>TaskTracker.create()</code> — Tạo task mới, trả task_id",
+            "<code>TaskTracker.get_status(task_id)</code> — Kiểm tra tiến trình",
+            "Cập nhật notebook_store sau khi index xong",
+            "Ghi metrics: chunks_indexed, active_tasks"
+        ]
+    },
+    Worker2: {why: "Giúp API không bị nghẽn (timeout) khi người dùng upload file quá lớn (ví dụ: PDF 500 trang).", 
+        icon: "⚙️", title: "Background Worker", layer: "Tầng 3 · Xử lý Dữ liệu", file: "src/worker.py",
+        desc: "Xử lý file upload async bằng FastAPI BackgroundTasks. Trả task_id ngay lập tức, theo dõi trạng thái trong in-memory dict.",
+        details: [
+            {label:"File", value:"src/worker.py"},
+            {label:"Cơ chế", value:"FastAPI BackgroundTasks"},
+            {label:"Tracking", value:"TaskTracker — in-memory dict"},
+        ],
+        funcs: [
+            "<code>process_file_background()</code> — Gọi indexing pipeline",
+            "<code>TaskTracker.create()</code> — Tạo task, trả task_id",
+            "<code>TaskTracker.get_status()</code> — Kiểm tra tiến trình"
+        ]
+    },
+    Parser: {why: "LLM chỉ hiểu văn bản thuần túy (text). Cần trích xuất nội dung từ định dạng PDF, DOCX, ảnh.", 
+        icon: "📄", title: "MarkItDown Parser", layer: "Tầng 3 · Xử lý Dữ liệu", file: "src/indexing.py",
+        desc: "Parser đa định dạng chuyển mọi file sang Markdown. Dùng MarkItDown cho DOCX/PPTX/XLSX/HTML, fallback PyPDFLoader cho PDF, OCR cho ảnh.",
+        details: [
+            {label:"File", value:"src/indexing.py"},
+            {label:"Function", value:"_load_with_markitdown(path)"},
+            {label:"Input", value:"PDF, DOCX, PPTX, XLSX, HTML, Image"},
+            {label:"Output", value:"Raw Markdown text"},
+            {label:"Fallback", value:"PyPDFLoader nếu MarkItDown thất bại"},
+        ],
+        funcs: [
+            "PDF → MarkItDown hoặc PyPDFLoader",
+            "DOCX/PPTX/XLSX → MarkItDown → Markdown",
+            "HTML → MarkItDown → Markdown",
+            "Image → OCR → Text",
+            "Giữ lại metadata: filename, page number"
+        ]
+    },
+    Parse: {why: "LLM chỉ hiểu văn bản thuần túy (text). Cần trích xuất nội dung từ định dạng PDF, DOCX, ảnh.", 
+        icon: "📄", title: "MarkItDown Parser", layer: "Tầng 3 · Xử lý Dữ liệu", file: "src/indexing.py",
+        desc: "Parser đa định dạng chuyển mọi file sang Markdown.",
+        details: [{label:"File", value:"src/indexing.py"}, {label:"Function", value:"_load_with_markitdown(path)"}],
+        funcs: ["PDF → MarkItDown/PyPDFLoader", "DOCX/PPTX/XLSX → MarkItDown", "Image → OCR"]
+    },
+    Chunker: {why: "Văn bản quá dài sẽ tràn Context Window của LLM, hoặc làm giảm độ chính xác. Chunk nhỏ giúp target đúng thông tin.", 
+        icon: "✂️", title: "Recursive Character Splitter", layer: "Tầng 3 · Xử lý Dữ liệu", file: "src/indexing.py",
+        desc: "Chia văn bản Markdown thành các chunk nhỏ bằng RecursiveCharacterTextSplitter của LangChain. Mỗi chunk mang ChunkMetadata đầy đủ.",
+        details: [
+            {label:"File", value:"src/indexing.py"},
+            {label:"Function", value:"build_chunks(file_paths)"},
+            {label:"Chunk size", value:"1000 ký tự"},
+            {label:"Overlap", value:"150 ký tự"},
+            {label:"Splitter", value:"LangChain RecursiveCharacterTextSplitter"},
+        ],
+        funcs: [
+            "Tách văn bản theo phân cấp: \\n\\n → \\n → câu → từ",
+            "Gán ChunkMetadata cho mỗi chunk:",
+            "  • document_id, chunk_id (UUID5)",
+            "  • filename, page, section",
+            "  • notebook_id (để data isolation)"
+        ]
+    },
+    Chunk: {why: "Văn bản quá dài sẽ tràn Context Window của LLM, hoặc làm giảm độ chính xác.", 
+        icon: "✂️", title: "Recursive Chunker", layer: "Tầng 3 · Xử lý Dữ liệu", file: "src/indexing.py",
+        desc: "Chia văn bản thành chunks 1000 chars / 150 overlap.",
+        details: [{label:"File", value:"src/indexing.py"}, {label:"Size", value:"1000 chars"}, {label:"Overlap", value:"150 chars"}],
+        funcs: ["RecursiveCharacterTextSplitter", "Gán ChunkMetadata: document_id, chunk_id, filename, page"]
+    },
+    Embedder: {why: "Chuyển ngôn ngữ tự nhiên (tiếng Việt) thành vector số học đa chiều để máy tính hiểu ý nghĩa.", 
+        icon: "🔢", title: "GreenNode Embedding", layer: "Tầng 3 · Xử lý Dữ liệu", file: "src/store.py",
+        desc: "Model embedding tiếng Việt chuyên dụng. Chuyển text chunk thành vector 1024 chiều. Có chế độ low_vram dùng MiniLM nhẹ hơn.",
+        details: [
+            {label:"File", value:"src/store.py → get_embeddings()"},
+            {label:"Model chính", value:"GreenNode/GreenNode-Embedding-Large-VN-Mixed-V1"},
+            {label:"Model nhẹ", value:"sentence-transformers/all-MiniLM-L6-v2 (low_vram)"},
+            {label:"Output", value:"Vector 1024 chiều (hoặc 384 MiniLM)"},
+            {label:"Cache", value:"Singleton qua lru_cache"},
+        ],
+        funcs: [
+            "<code>get_embeddings()</code> — Load model (cached singleton)",
+            "Encode text → dense vector",
+            "Tự chọn model theo low_vram_mode config"
+        ]
+    },
+    Embed: {why: "Chuyển ngôn ngữ tự nhiên (tiếng Việt) thành vector số học đa chiều để máy tính hiểu ý nghĩa.", 
+        icon: "🔢", title: "GreenNode Embedding", layer: "Tầng 3 · Xử lý Dữ liệu", file: "src/store.py",
+        desc: "SentenceTransformer embedding model tiếng Việt.",
+        details: [{label:"Model", value:"GreenNode-Embedding-Large-VN-Mixed-V1"}, {label:"Output", value:"Vector 1024d"}],
+        funcs: ["<code>get_embeddings()</code> — Cached singleton", "Text → Dense vector"]
+    },
+    Token: {why: "Trích xuất các từ khóa chính xác để hỗ trợ tìm kiếm BM25 (tránh sót tên riêng, mã số).", 
+        icon: "🔤", title: "BM25 Tokenizer", layer: "Tầng 3 · Xử lý Dữ liệu", file: "src/bm25_index.py",
+        desc: "Tokenize text bằng whitespace splitter, giữ nguyên ký tự tiếng Việt. Thêm vào inverted index BM25.",
+        details: [{label:"File", value:"src/bm25_index.py"}, {label:"Tokenizer", value:"Whitespace + Vietnamese-aware"}],
+        funcs: ["<code>BM25Index.add(chunks)</code> — Tokenize & index", "Simple whitespace split, giữ Vietnamese chars"]
+    },
+
+    // === Tầng 4: Kho Tri thức ===
+    Qdrant: {why: "Vector Database chuyên dụng để tìm nhanh các chunk có ngữ nghĩa tương đương câu hỏi.", 
+        icon: "📦", title: "Qdrant Vector Database", layer: "Tầng 4 · Kho Tri thức", file: "src/store.py",
+        desc: "Vector database lưu trữ embeddings. Hỗ trợ tìm kiếm cosine similarity, payload filtering, và scroll toàn bộ. File-based storage (local).",
+        details: [
+            {label:"File", value:"src/store.py"},
+            {label:"Client", value:"Qdrant Python SDK — local file storage"},
+            {label:"Distance", value:"Cosine similarity"},
+            {label:"Payload indexes", value:"notebook_id, document_id, filename, page"},
+            {label:"Storage", value:"storage/qdrant/"},
+        ],
+        funcs: [
+            "<code>get_vector_store(collection)</code> — Tạo/lấy collection",
+            "<code>ensure_collection()</code> — Tạo collection + payload indexes",
+            "<code>search(vector, top_k, filters)</code> — Tìm kiếm semantic",
+            "<code>scroll(filters)</code> — Lấy toàn bộ chunks theo filter",
+            "<code>upsert(chunks)</code> — Thêm vectors + metadata",
+            "UUID5 IDs — deterministic, không trùng lặp"
+        ]
+    },
+    QStore: {why: "Vector Database chuyên dụng để tìm nhanh các chunk có ngữ nghĩa tương đương câu hỏi.", 
+        icon: "📦", title: "Qdrant Vector DB", layer: "Tầng 4 · Kho Tri thức", file: "src/store.py",
+        desc: "Vector database lưu embeddings, tìm kiếm cosine similarity.",
+        details: [{label:"File", value:"src/store.py"}, {label:"Storage", value:"storage/qdrant/"}],
+        funcs: ["<code>upsert(chunks)</code>", "<code>search(vector, top_k, filters)</code>", "<code>scroll(filters)</code>"]
+    },
+    BM25: {why: "Hệ thống keyword matching truyền thống. Bù đắp khuyết điểm của Vector (dễ trượt từ khóa chính xác).", 
+        icon: "📝", title: "RankBM25 Inverted Index", layer: "Tầng 4 · Kho Tri thức", file: "src/bm25_index.py",
+        desc: "Index keyword BM25 chạy trên RAM cho tìm kiếm nhanh. Persist ra disk bằng pickle + JSON. Mỗi notebook có index riêng (singleton).",
+        details: [
+            {label:"File", value:"src/bm25_index.py"},
+            {label:"Algorithm", value:"BM25 Okapi"},
+            {label:"Storage", value:"RAM (inverted index) + disk persist"},
+            {label:"Persist format", value:"bm25_docs.json + bm25_index.pkl"},
+            {label:"Isolation", value:"Per-notebook singleton"},
+        ],
+        funcs: [
+            "<code>get_bm25_index(notebook_id)</code> — Singleton, auto-load",
+            "<code>BM25Index.build(chunks)</code> — Xây index mới",
+            "<code>BM25Index.add(chunks)</code> — Thêm chunks",
+            "<code>BM25Index.search(query, top_k)</code> — Tìm kiếm keyword",
+            "<code>BM25Index.save()</code> — Persist ra disk",
+            "<code>BM25Index.load()</code> — Load từ disk"
+        ]
+    },
+    BStore: {why: "Lưu trữ inverted index tốc độ cao để tìm kiếm keyword.", 
+        icon: "📝", title: "RankBM25 Index", layer: "Tầng 4 · Kho Tri thức", file: "src/bm25_index.py",
+        desc: "BM25 inverted index trên RAM, persist bằng pickle.",
+        details: [{label:"File", value:"src/bm25_index.py"}, {label:"Persist", value:"pickle + JSON"}],
+        funcs: ["<code>add(chunks)</code>", "<code>search(query, top_k)</code>", "<code>save()/load()</code>"]
+    },
+
+    // === Tầng 5: Truy xuất ===
+    Router: {why: "Phân nhánh tối ưu: Q&A cần tìm kiếm dữ liệu cụ thể, Summary/Quiz cần lấy toàn bộ văn bản.", 
+        icon: "🔀", title: "Scope Router", layer: "Tầng 5 · Truy xuất", file: "src/retrieval/router.py",
+        desc: "Quyết định chiến lược truy xuất: HYBRID (tìm kiếm cụ thể cho câu hỏi) hoặc SCROLL (lấy toàn bộ chunks cho tóm tắt/quiz/flashcard).",
+        details: [
+            {label:"File", value:"src/retrieval/router.py"},
+            {label:"Class", value:"ScopeRouter"},
+            {label:"Output", value:"ScopeDecision (scope_type + filters)"},
+        ],
+        funcs: [
+            "<code>ScopeRouter.resolve(question, task_type)</code>",
+            "Nếu có query text → scope = QUERY → Hybrid Search",
+            "Nếu không có query → scope = SCROLL → Fetch all chunks",
+            "Trả về ScopeDecision kèm metadata filters"
+        ]
+    },
+    Router2: {why: "Phân nhánh tối ưu: Q&A cần tìm kiếm dữ liệu cụ thể, Summary/Quiz cần lấy toàn bộ văn bản.", 
+        icon: "🔀", title: "Scope Router", layer: "Tầng 5 · Truy xuất", file: "src/retrieval/router.py",
+        desc: "Phân loại query: HYBRID (tìm kiếm) hoặc SCROLL (lấy hết).",
+        details: [{label:"File", value:"src/retrieval/router.py"}],
+        funcs: ["<code>resolve(question, task_type)</code>", "Query → HYBRID, No query → SCROLL"]
+    },
+    HybridSearch: {why: "Kết hợp sức mạnh cả Vector và Keyword để không bỏ lọt mảnh thông tin nào.", 
+        icon: "🔍", title: "Hybrid Search", layer: "Tầng 5 · Truy xuất", file: "src/retrieval/hybrid_search.py",
+        desc: "Chạy song song 2 luồng tìm kiếm: Qdrant semantic + BM25 keyword bằng ThreadPoolExecutor. Merge kết quả bằng Reciprocal Rank Fusion (RRF).",
+        details: [
+            {label:"File", value:"src/retrieval/hybrid_search.py"},
+            {label:"Class", value:"HybridSearcher"},
+            {label:"Parallel", value:"ThreadPoolExecutor"},
+            {label:"Fusion", value:"RRF — k=60"},
+            {label:"RRF formula", value:"score(d) = Σ 1/(60 + rank_i(d))"},
+            {label:"Output", value:"~15 chunks thô (fused + deduped)"},
+        ],
+        funcs: [
+            "<code>HybridSearcher.search(query, embedding, notebook_id, top_k)</code>",
+            "Thread 1: Qdrant semantic search (cosine similarity)",
+            "Thread 2: BM25 keyword search (Okapi scoring)",
+            "Reciprocal Rank Fusion merge",
+            "Deduplicate by chunk_id",
+            "→ Top ~15 candidate chunks"
+        ]
+    },
+    Reranker: {why: "Tìm kiếm ban đầu nhanh nhưng thô. Cần AI chấm điểm lại chính xác hơn để cung cấp kết quả tinh sạch nhất cho LLM.", 
+        icon: "⚖️", title: "Cross-Encoder Reranker", layer: "Tầng 5 · Truy xuất", file: "src/retrieval/reranker.py",
+        desc: "Chấm điểm lại từng cặp (query, chunk) bằng cross-encoder model. Lọc 15 chunks thô xuống còn 5 chunks chất lượng cao nhất.",
+        details: [
+            {label:"File", value:"src/retrieval/reranker.py"},
+            {label:"Class", value:"CrossEncoderReranker"},
+            {label:"Model chính", value:"BAAI/bge-reranker-v2-m3"},
+            {label:"Model nhẹ", value:"cross-encoder/mmarco-mMiniLMv2-L12-H384 (low_vram)"},
+            {label:"Input", value:"15 candidate chunks"},
+            {label:"Output", value:"Top 5 chunks (chất lượng cao nhất)"},
+            {label:"Loading", value:"Lazy load — load model lần đầu sử dụng"},
+        ],
+        funcs: [
+            "<code>CrossEncoderReranker.rerank(query, chunks, top_k=5)</code>",
+            "Tính cross-encoder score cho mỗi (query, chunk_text)",
+            "Sắp xếp giảm dần theo score",
+            "Giữ lại top_k chunks"
+        ]
+    },
+    Rerank: {why: "Tìm kiếm ban đầu nhanh nhưng thô. Cần AI chấm điểm lại chính xác hơn để cung cấp kết quả tinh sạch nhất cho LLM.", 
+        icon: "⚖️", title: "Cross-Encoder Reranker", layer: "Tầng 5 · Truy xuất", file: "src/retrieval/reranker.py",
+        desc: "Chấm điểm lại 15 chunks, giữ top 5.",
+        details: [{label:"Model", value:"BAAI/bge-reranker-v2-m3"}, {label:"Input→Output", value:"15 → 5 chunks"}],
+        funcs: ["<code>rerank(query, chunks, top_k=5)</code>", "Cross-encoder scoring (query, chunk_text)"]
+    },
+    Scroll: {why: "Tác vụ học tập (Tóm tắt, Quiz) yêu cầu nắm TOÀN BỘ kiến thức, không được phép bỏ sót data qua search.", 
+        icon: "📜", title: "Scroll All Chunks", layer: "Tầng 5 · Truy xuất", file: "src/rag.py",
+        desc: "Lấy toàn bộ chunks của một notebook từ Qdrant. Dùng cho tóm tắt, quiz, flashcard — cần toàn bộ nội dung, không chỉ top-K.",
+        details: [{label:"Function", value:"rag.fetch_all_chunks(filters)"}, {label:"Sử dụng", value:"Summary, Quiz, Flashcard"}],
+        funcs: ["<code>fetch_all_chunks(filters)</code>", "Qdrant scroll API — không giới hạn top_k", "Dùng khi cần toàn bộ nội dung notebook"]
+    },
+    Scroll2: {why: "Tác vụ học tập (Tóm tắt, Quiz) yêu cầu nắm TOÀN BỘ kiến thức, không được phép bỏ sót data qua search.", 
+        icon: "📜", title: "Scroll All Chunks", layer: "Tầng 5 · Truy xuất", file: "src/rag.py",
+        desc: "Lấy toàn bộ chunks của notebook từ Qdrant cho học tập.",
+        details: [{label:"Function", value:"rag.fetch_all_chunks(filters)"}],
+        funcs: ["Qdrant scroll — lấy tất cả chunks", "Dùng cho summary / quiz / flashcard"]
+    },
+    ContextBuilder: {why: "LLM cần context được đánh số [S1] [S2] để biết chính xác thông tin ở đâu và trích dẫn.", 
+        icon: "📋", title: "Context Builder", layer: "Tầng 5 · Truy xuất", file: "src/retrieval/context_builder.py",
+        desc: "Đóng gói chunks đã rerank thành context string có đánh số [S1] [S2] ... [SN]. Tạo Citation objects để LLM có thể trích dẫn chính xác.",
+        details: [
+            {label:"File", value:"src/retrieval/context_builder.py"},
+            {label:"Class", value:"ContextBuilder"},
+            {label:"Output", value:"RetrievalContext (context string + citations)"},
+        ],
+        funcs: [
+            "<code>ContextBuilder.build(chunks, scope, target)</code>",
+            "<code>format_citations(chunks)</code> — Tạo [S1]..[SN] markers",
+            "Mỗi Citation: source marker + filename + page + text snippet",
+            "→ LLM dùng markers để trích dẫn chính xác trong câu trả lời"
+        ]
+    },
+    CB: {why: "LLM cần context được đánh số [S1] [S2] để biết chính xác thông tin ở đâu và trích dẫn.", 
+        icon: "📋", title: "Context Builder", layer: "Tầng 5 · Truy xuất", file: "src/retrieval/context_builder.py",
+        desc: "Đóng gói chunks thành context string [S1]..[SN].",
+        details: [{label:"File", value:"src/retrieval/context_builder.py"}],
+        funcs: ["<code>build(chunks)</code>", "<code>format_citations(chunks)</code> → [S1]..[SN]"]
+    },
+
+    // === Tầng 6: Tạo sinh ===
+    Jinja: {why: "Tách biệt cấu trúc prompt khỏi code Python. Dễ sửa đổi, điều hướng LLM làm đúng nhiệm vụ.", 
+        icon: "📝", title: "Jinja2 Prompt Templates", layer: "Tầng 6 · Tạo sinh", file: "src/prompts/",
+        desc: "6 template Jinja2 cho các loại prompt khác nhau. Tất cả đều bằng tiếng Việt và yêu cầu output JSON nghiêm ngặt.",
+        details: [{label:"Thư mục", value:"src/prompts/"}, {label:"Số templates", value:"6 files"}],
+        funcs: [
+            "<code>answer.jinja2</code> — Q&A: System + Context [S1..SN] + History + Question",
+            "<code>summary_single.jinja2</code> — Tóm tắt 1 lần (nội dung ngắn)",
+            "<code>summary_map.jinja2</code> — Map phase: tóm tắt 1 batch",
+            "<code>summary_reduce.jinja2</code> — Reduce phase: merge sub-summaries",
+            "<code>quiz.jinja2</code> — Sinh MCQ → JSON {items: QuizItem[]}",
+            "<code>flashcards.jinja2</code> — Sinh flashcard → JSON {cards: FlashcardItem[]}"
+        ]
+    },
+    MapReduce: {why: "LLM không thể đọc quá nhiều text cùng lúc. Phải cắt nhỏ (Map) tóm tắt, sau đó gộp lại (Reduce).", 
+        icon: "🗺️", title: "Map-Reduce Batching", layer: "Tầng 6 · Tạo sinh", file: "src/learning.py",
+        desc: "Chia nội dung dài thành batches, tóm tắt từng batch (Map), rồi tổng hợp (Reduce). Giải quyết giới hạn context window của LLM.",
+        details: [
+            {label:"File", value:"src/learning.py → summarize()"},
+            {label:"Batch size", value:"~5000 chars/batch"},
+            {label:"Map template", value:"summary_map.jinja2"},
+            {label:"Reduce template", value:"summary_reduce.jinja2"},
+        ],
+        funcs: [
+            "Map: Chia chunks → batches → LLM tóm tắt từng batch",
+            "Reduce: Gộp sub-summaries → LLM tổng hợp cuối",
+            "Single-pass nếu nội dung đủ ngắn (summary_single.jinja2)"
+        ]
+    },
+    LLMFactory: {why: "Linh hoạt chuyển đổi giữa API đám mây và Local AI tùy cấu hình tài nguyên của user.", 
+        icon: "🏭", title: "LLM Factory Pattern", layer: "Tầng 6 · Tạo sinh", file: "src/llm.py",
+        desc: "Factory pattern chọn LLM backend dựa trên config. Hỗ trợ 4 provider: Gemini (cloud), HuggingFace (local), vLLM (production), GGUF (edge).",
+        details: [
+            {label:"File", value:"src/llm.py"},
+            {label:"Config", value:"RAG_LLM_PROVIDER trong .env"},
+            {label:"Providers", value:"gemini, hf_local, vllm, gguf"},
+        ],
+        funcs: [
+            "<code>get_llm(provider)</code> — Factory, cached singleton",
+            "<code>invoke_llm(prompt)</code> — Sync generation",
+            "<code>stream_llm(prompt)</code> — Streaming with fallback",
+            "Auto-chọn GGUF khi hf_local + low_vram_mode"
+        ]
+    },
+    LLM2: {why: "Linh hoạt chuyển đổi giữa API đám mây và Local AI tùy cấu hình tài nguyên của user.", 
+        icon: "🏭", title: "LLM Factory", layer: "Tầng 6 · Tạo sinh", file: "src/llm.py",
+        desc: "Factory pattern chọn LLM backend.",
+        details: [{label:"File", value:"src/llm.py"}, {label:"Providers", value:"gemini / hf_local / vllm / gguf"}],
+        funcs: ["<code>get_llm(provider)</code>", "<code>invoke_llm(prompt)</code>", "<code>stream_llm(prompt)</code>"]
+    },
+    Gemini: {why: "API Cloud LLM cực mạnh, cực nhanh cho trải nghiệm tốt nhất.", 
+        icon: "🌐", title: "Gemini API", layer: "Tầng 6 · Tạo sinh", file: "src/llm.py",
+        desc: "Google Gemini API — LLM backend mặc định (baseline). Hỗ trợ streaming. Cần GOOGLE_API_KEY.",
+        details: [{label:"SDK", value:"google.generativeai"}, {label:"Config", value:"GOOGLE_API_KEY trong .env"}, {label:"Streaming", value:"Có"}],
+        funcs: ["Streaming token generation", "Cảnh báo privacy khi dùng với tài liệu nhạy cảm"]
+    },
+    G: {why: "Cloud LLM siêu việt.", 
+        icon: "🌐", title: "Gemini API", layer: "Tầng 6 · Tạo sinh", file: "src/llm.py",
+        desc: "Google Gemini — LLM cloud mặc định.",
+        details: [{label:"SDK", value:"google.generativeai"}, {label:"Streaming", value:"Có"}],
+        funcs: ["Cloud API, cần GOOGLE_API_KEY", "Cảnh báo privacy cho tài liệu nhạy cảm"]
+    },
+    HFLocal: {why: "Dành cho doanh nghiệp cần bảo mật 100% data, không truyền ra ngoài internet.", 
+        icon: "🤗", title: "HuggingFace Local", layer: "Tầng 6 · Tạo sinh", file: "src/llm.py",
+        desc: "Chạy LLM local bằng HuggingFace Transformers pipeline. Không gửi data ra ngoài. Tự chuyển sang GGUF nếu low_vram.",
+        details: [{label:"Framework", value:"transformers pipeline"}, {label:"Low VRAM", value:"Auto-switch sang GGUF 4-bit"}],
+        funcs: ["Local inference, không cần API key", "Privacy-safe cho tài liệu nhạy cảm"]
+    },
+    H: {why: "Local LLM on-premise.", 
+        icon: "🤗", title: "HuggingFace Local", layer: "Tầng 6 · Tạo sinh", file: "src/llm.py",
+        desc: "LLM local bằng transformers pipeline.",
+        details: [{label:"Framework", value:"transformers"}, {label:"Privacy", value:"100% local"}],
+        funcs: ["Local inference", "Auto GGUF khi low_vram"]
+    },
+    vLLM: {why: "Tối ưu tốc độ xuất chữ (tokens/sec) cho local LLM, phục vụ đa luồng.", 
+        icon: "🚀", title: "vLLM Server", layer: "Tầng 6 · Tạo sinh", file: "src/llm.py",
+        desc: "Production-grade LLM serving qua vLLM. Giao tiếp OpenAI-compatible HTTP API. Tối ưu throughput cao.",
+        details: [{label:"Protocol", value:"OpenAI-compatible HTTP"}, {label:"Use case", value:"Production deployment"}],
+        funcs: ["High-throughput serving", "OpenAI-compatible API client"]
+    },
+    V: {why: "Fast local inference.", 
+        icon: "🚀", title: "vLLM Server", layer: "Tầng 6 · Tạo sinh", file: "src/llm.py",
+        desc: "Production LLM server.",
+        details: [{label:"Protocol", value:"OpenAI-compatible"}, {label:"Use case", value:"Production"}],
+        funcs: ["High-throughput serving"]
+    },
+    GGUF: {why: "Giúp chạy LLM trực tiếp trên CPU hoặc máy yếu (low VRAM mode).", 
+        icon: "💎", title: "GGUF 4-bit (llama.cpp)", layer: "Tầng 6 · Tạo sinh", file: "src/llm_gguf.py",
+        desc: "Chạy model quantized 4-bit bằng llama-cpp-python. Dành cho máy 4GB VRAM. Tự download model từ HuggingFace Hub.",
+        details: [
+            {label:"File", value:"src/llm_gguf.py"},
+            {label:"Engine", value:"llama-cpp-python"},
+            {label:"Quantization", value:"4-bit GGUF"},
+            {label:"VRAM", value:"Tối thiểu 4GB"},
+        ],
+        funcs: [
+            "<code>get_llama_cpp()</code> — Download + init model",
+            "<code>invoke_gguf(prompt)</code> — Sync generation",
+            "<code>stream_gguf(prompt)</code> — Streaming",
+            "<code>GGUFChatAdapter</code> — Adapter cho LangChain interface",
+            "Full GPU offload cho tốc độ tối ưu"
+        ]
+    },
+    GG: {why: "Cloud LLM siêu việt.", 
+        icon: "💎", title: "GGUF 4-bit", layer: "Tầng 6 · Tạo sinh", file: "src/llm_gguf.py",
+        desc: "LLM quantized 4-bit cho thiết bị nhẹ.",
+        details: [{label:"Engine", value:"llama-cpp-python"}, {label:"VRAM", value:"4GB minimum"}],
+        funcs: ["<code>get_llama_cpp()</code>", "<code>invoke_gguf()</code>", "<code>stream_gguf()</code>"]
+    },
+    StreamBatch: {why: "Gửi từng đoạn chữ nhỏ xuống trình duyệt để User đọc ngay lập tức, không bắt họ chờ lâu.", 
+        icon: "📡", title: "Stream Batching", layer: "Tầng 6 · Tạo sinh", file: "src/stream_batching.py",
+        desc: "Buffer tokens từ LLM generator rồi gom lô (mỗi ~50ms) trước khi yield qua SSE. Giảm overhead network.",
+        details: [
+            {label:"File", value:"src/stream_batching.py"},
+            {label:"Class", value:"StreamBatcher"},
+            {label:"Interval", value:"50ms (configurable)"},
+            {label:"SSE format", value:"data: {\"text\": \"...\"}\\n\\n"},
+        ],
+        funcs: [
+            "<code>StreamBatcher.batch()</code> — Yield batched text",
+            "<code>StreamBatcher.batch_as_sse()</code> — Yield SSE-formatted events",
+            "Signal done: data: {\"done\": true}"
+        ]
+    },
+    Stream: {why: "Gửi từng đoạn chữ nhỏ xuống trình duyệt để User đọc ngay lập tức.", 
+        icon: "📡", title: "Stream Batcher", layer: "Tầng 6 · Tạo sinh", file: "src/stream_batching.py",
+        desc: "Gom lô tokens mỗi 50ms, yield qua SSE.",
+        details: [{label:"File", value:"src/stream_batching.py"}, {label:"Interval", value:"50ms"}],
+        funcs: ["<code>batch()</code> — Yield batched text", "<code>batch_as_sse()</code> — SSE events"]
+    },
+    Pydantic: {why: "Ép LLM trả về đúng schema JSON của Quiz/Flashcard, tự sửa và lọc lỗi sai định dạng.", 
+        icon: "✅", title: "Pydantic Validation", layer: "Tầng 6 · Tạo sinh", file: "src/schemas.py",
+        desc: "Validate JSON output từ LLM bằng Pydantic models. Đảm bảo quiz có đủ đáp án, flashcard có front/back, dedup, lọc source markers.",
+        details: [
+            {label:"File", value:"src/schemas.py + src/learning.py"},
+            {label:"Models", value:"QuizItem, FlashcardItem"},
+        ],
+        funcs: [
+            "<code>QuizItem</code>: question, options[4], correct_index, explanation, difficulty, topic",
+            "<code>FlashcardItem</code>: front, back, hint, topic, source_markers",
+            "<code>_parse_json()</code> — Trích xuất JSON từ LLM output",
+            "<code>_validate_items()</code> — Pydantic validation + dedup"
+        ]
+    },
+    Block: {why: "Trả JSON định dạng cứng dành cho hệ thống phân tích data (không phải cho text reader).", 
+        icon: "📦", title: "Full JSON Response", layer: "Tầng 6 · Tạo sinh",
+        desc: "Trả về response đầy đủ dạng JSON (không streaming). Dùng cho quiz, flashcard, summary.",
+        details: [{label:"Format", value:"JSON"}, {label:"Use case", value:"Quiz, Flashcard, Summary"}],
+        funcs: ["Full response → Pydantic validate → JSON"]
+    },
+
+    // === Misc ===
+    Upload: {why: "Đưa tài liệu thô vào hệ thống.", 
+        icon: "📄", title: "File Upload", layer: "Tầng 1 · Giao diện",
+        desc: "Người dùng upload file qua Web UI hoặc CLI. Hỗ trợ PDF, DOCX, PPTX, XLSX, HTML, Markdown, Image.",
+        details: [{label:"Formats", value:"PDF, DOCX, PPTX, XLSX, HTML, MD, Image"}],
+        funcs: ["Drag & drop trên Streamlit UI", "CLI: đặt file vào data/ rồi chạy ingest"]
+    },
+    API: {
+        icon: "⚡", title: "POST /upload", layer: "Tầng 1 · Giao diện", file: "src/interfaces/api.py",
+        desc: "Endpoint upload file. Trả task_id ngay lập tức (non-blocking), xử lý file trong background.",
+        details: [{label:"Method", value:"POST /upload/{notebook_id}"}, {label:"Response", value:"{task_id} — trả ngay"}],
+        funcs: ["Nhận file multipart", "Tạo BackgroundTask", "Trả task_id để poll status"]
+    },
+    Status: {why: "Giám sát trạng thái background.", 
+        icon: "📋", title: "Task Status Tracker", layer: "Tầng 3 · Xử lý Dữ liệu", file: "src/worker.py",
+        desc: "Theo dõi trạng thái upload: pending → processing → done/error.",
+        details: [{label:"Endpoint", value:"GET /upload/status/{task_id}"}, {label:"States", value:"pending → processing → done / error"}],
+        funcs: ["<code>TaskTracker.get_status(task_id)</code>", "Trả về: status, chunks_indexed, error_message"]
+    },
+    Q: {why: "Truyền đạt nhu cầu kiến thức của người dùng.", 
+        icon: "❓", title: "User Question", layer: "Tầng 1 · Giao diện",
+        desc: "Câu hỏi của người dùng kèm session_id (cho conversation history) và notebook_id (cho data isolation).",
+        details: [{label:"Params", value:"question + session_id + notebook_id"}],
+        funcs: ["Gửi qua /ask (sync) hoặc /ask/stream (SSE)", "Kèm session_id để giữ hội thoại", "Kèm notebook_id để giới hạn phạm vi tìm kiếm"]
+    },
+    CacheGet: {why: "Bỏ qua các bước tính toán RAG phức tạp nếu câu hỏi bị trùng.", 
+        icon: "💾", title: "Cache Lookup", layer: "Tầng 2 · MLOps", file: "src/cache.py",
+        desc: "Kiểm tra Redis cache bằng SHA256 hash của query normalize. Nếu hit → trả ngay, skip toàn bộ pipeline.",
+        details: [{label:"Key", value:"SHA256(normalize(query))"}, {label:"Hit → ", value:"Trả lời ~0.1s, skip pipeline"}],
+        funcs: ["<code>cache.get(query)</code>", "Normalize: lowercase, strip, remove punctuation", "Miss → tiếp tục pipeline RAG"]
+    },
+    CacheHit: {why: "Trả lời siêu tốc, giảm tải hệ thống.", 
+        icon: "✅", title: "Cache HIT", layer: "Tầng 2 · MLOps",
+        desc: "Câu hỏi đã được trả lời trước đó. Trả kết quả cached ngay lập tức (~0.1 giây), bỏ qua toàn bộ pipeline RAG.",
+        details: [{label:"Tốc độ", value:"~0.1 giây"}, {label:"Action", value:"Skip retrieval + LLM"}],
+        funcs: ["Trả cached RagAnswer ngay lập tức"]
+    },
+    SessionGet: {why: "Đảm bảo tính liên tục của đoạn hội thoại, LLM nhớ context.", 
+        icon: "🧠", title: "Session History", layer: "Tầng 2 · MLOps", file: "src/session.py",
+        desc: "Lấy N tin nhắn gần nhất từ session để inject vào prompt. Giúp LLM hiểu ngữ cảnh hội thoại.",
+        details: [{label:"Format", value:"\"Người dùng: .../Trợ lý: ...\""}],
+        funcs: ["<code>session.get_history(session_id)</code>", "Format thành context string cho Jinja2"]
+    },
+    VSearch: {why: "Tìm theo ý nghĩa ẩn sâu của câu hỏi.", 
+        icon: "🔍", title: "Qdrant Semantic Search", layer: "Tầng 5 · Truy xuất", file: "src/store.py",
+        desc: "Tìm kiếm semantic bằng cosine similarity giữa query embedding và stored vectors. Áp dụng metadata filters.",
+        details: [{label:"Method", value:"Cosine similarity"}, {label:"Filters", value:"notebook_id, filename, page"}],
+        funcs: ["<code>store.search(embedding, top_k, filters)</code>", "Trả top-K chunks theo similarity score"]
+    },
+    KSearch: {why: "Tìm theo từ khoá chính xác trên văn bản.", 
+        icon: "🔤", title: "BM25 Keyword Search", layer: "Tầng 5 · Truy xuất", file: "src/bm25_index.py",
+        desc: "Tìm kiếm keyword bằng BM25 Okapi scoring. Bổ sung cho semantic search — bắt exact term matches.",
+        details: [{label:"Algorithm", value:"BM25 Okapi"}, {label:"Tokenizer", value:"Whitespace + Vietnamese"}],
+        funcs: ["<code>bm25_index.search(query, top_k)</code>", "Bắt exact keywords mà semantic có thể bỏ lỡ"]
+    },
+    RRF: {why: "Thuật toán công bằng để gộp và sắp xếp kết quả từ cả 2 nguồn (Vector và BM25).", 
+        icon: "🔄", title: "Reciprocal Rank Fusion", layer: "Tầng 5 · Truy xuất", file: "src/retrieval/hybrid_search.py",
+        desc: "Merge kết quả từ 2 luồng tìm kiếm bằng công thức RRF. Deduplicate theo chunk_id.",
+        details: [{label:"Formula", value:"score(d) = Σ 1/(60 + rank_i(d))"}, {label:"k", value:"60"}, {label:"Output", value:"~15 chunks"}],
+        funcs: ["Merge semantic + keyword results", "Deduplicate by chunk_id", "Sort by fused score"]
+    },
+    Template: {why: "Tách biệt cấu trúc prompt khỏi code Python. Dễ sửa đổi, điều hướng LLM làm đúng nhiệm vụ.", 
+        icon: "📝", title: "answer.jinja2", layer: "Tầng 6 · Tạo sinh", file: "src/prompts/answer.jinja2",
+        desc: "Template prompt cho Q&A. Bao gồm: system instructions, context block [S1..SN], conversation history, user question. Yêu cầu LLM trích dẫn nguồn.",
+        details: [{label:"File", value:"src/prompts/answer.jinja2"}],
+        funcs: ["System: Bạn là trợ lý học tập...", "Context: [S1] chunk1 [S2] chunk2...", "History: Người dùng/Trợ lý turns", "Question: câu hỏi hiện tại", "Instruction: trích dẫn bằng [S1][S2]"]
+    },
+    Save: {why: "Hoàn tất chu trình lưu vết (cache, metrics) để tối ưu lần sau.", 
+        icon: "💾", title: "Post-processing", layer: "Tầng 2 · MLOps",
+        desc: "Sau khi có câu trả lời: lưu vào Redis cache, thêm vào session history, ghi Prometheus metrics.",
+        details: [{label:"Actions", value:"Cache + Session + Metrics"}],
+        funcs: ["<code>cache.put(query, answer)</code>", "<code>session.add_turn(user + assistant)</code>", "<code>observability.record_query(latency, ...)</code>"]
+    },
+    Req: {why: "Khởi chạy workflow học tập theo yêu cầu user.", 
+        icon: "📚", title: "Yêu cầu học tập", layer: "Tầng 1 · Giao diện",
+        desc: "Người dùng yêu cầu tóm tắt, sinh quiz, hoặc tạo flashcard từ nội dung đã upload.",
+        details: [{label:"Endpoints", value:"/summarize, /quiz, /flashcards"}],
+        funcs: ["POST /summarize — Tóm tắt tài liệu", "POST /quiz — Sinh N câu trắc nghiệm", "POST /flashcards — Sinh N flashcard"]
+    },
+    Check: {why: "Xác định chiến lược MapReduce tùy theo độ dài của dữ liệu nạp vào.", 
+        icon: "📏", title: "Kiểm tra kích thước", layer: "Tầng 6 · Tạo sinh", file: "src/learning.py",
+        desc: "Quyết định single-pass hay Map-Reduce dựa trên tổng kích thước chunks.",
+        details: [{label:"Ngắn", value:"→ summary_single.jinja2"}, {label:"Dài", value:"→ Map-Reduce batching"}],
+        funcs: ["Nếu tổng chars < threshold → single pass", "Nếu quá dài → chia batches ~5000 chars"]
+    },
+    Single: {why: "Xử lý gộp 1 lần vì độ dài phù hợp.", 
+        icon: "📝", title: "Single-pass Summary", layer: "Tầng 6 · Tạo sinh", file: "src/prompts/summary_single.jinja2",
+        desc: "Tóm tắt nội dung ngắn chỉ bằng 1 lần gọi LLM.",
+        details: [{label:"Template", value:"summary_single.jinja2"}, {label:"Output", value:"JSON {summary, key_points}"}],
+        funcs: ["1 lần gọi LLM cho toàn bộ nội dung"]
+    },
+    Batch: {icon:"✂️", title:"Chia Batches", layer:"Tầng 6 · Tạo sinh", desc:"Chia chunks thành batches ~5000 chars.", details:[{label:"Size",value:"~5000 chars/batch"}], funcs:["Chia đều chunks vào batches"]},
+    M1: {why: "Tóm tắt cục bộ phần đầu.", icon:"🗺️", title:"Map Phase", layer:"Tầng 6 · Tạo sinh", desc:"Tóm tắt 1 batch bằng summary_map.jinja2.", details:[{label:"Template",value:"summary_map.jinja2"}], funcs:["LLM tóm tắt 1 batch → sub-summary"]},
+    M2: {icon:"🗺️", title:"Map Phase", layer:"Tầng 6 · Tạo sinh", desc:"Tóm tắt 1 batch bằng summary_map.jinja2.", details:[{label:"Template",value:"summary_map.jinja2"}], funcs:["LLM tóm tắt 1 batch → sub-summary"]},
+    MN: {why: "Tóm tắt cục bộ đoạn cuối.", icon:"🗺️", title:"Map Phase", layer:"Tầng 6 · Tạo sinh", desc:"Tóm tắt 1 batch bằng summary_map.jinja2.", details:[{label:"Template",value:"summary_map.jinja2"}], funcs:["LLM tóm tắt 1 batch → sub-summary"]},
+    Collect: {why: "Gom các ý tóm tắt nhỏ vào 1 prompt.", icon:"📥", title:"Collect Sub-summaries", layer:"Tầng 6 · Tạo sinh", desc:"Thu thập kết quả từ tất cả Map phases.", details:[], funcs:["Gộp sub-summaries từ mỗi batch"]},
+    Reduce: {icon:"🔗", title:"Reduce Phase", layer:"Tầng 6 · Tạo sinh", file:"src/prompts/summary_reduce.jinja2", desc:"Tổng hợp sub-summaries thành bản tóm tắt cuối cùng.", details:[{label:"Template",value:"summary_reduce.jinja2"}], funcs:["LLM merge sub-summaries → final summary"]},
+    QCtx: {icon:"🎯", title:"Quiz Generation", layer:"Tầng 6 · Tạo sinh", file:"src/learning.py", desc:"Sinh câu hỏi trắc nghiệm từ context bằng quiz.jinja2.", details:[{label:"Template",value:"quiz.jinja2"},{label:"Output",value:"JSON QuizItem[]"}], funcs:["Context → quiz.jinja2 → LLM → JSON", "MCQ: 4 options + correct_index + explanation"]},
+    QVal: {why: "Đảm bảo object chứa Quiz không bị rỗng/thiếu thuộc tính do ảo giác AI.", icon:"✅", title:"Quiz Validation", layer:"Tầng 6 · Tạo sinh", file:"src/schemas.py", desc:"Validate quiz JSON bằng Pydantic QuizItem.", details:[{label:"Model",value:"QuizItem, QuizSet"}], funcs:["Validate đáp án đầy đủ", "Deduplication", "Source marker filtering"]},
+    FCtx: {icon:"🃏", title:"Flashcard Generation", layer:"Tầng 6 · Tạo sinh", file:"src/learning.py", desc:"Sinh flashcard từ context bằng flashcards.jinja2.", details:[{label:"Template",value:"flashcards.jinja2"},{label:"Output",value:"JSON FlashcardItem[]"}], funcs:["Context → flashcards.jinja2 → LLM → JSON", "Mỗi card: front, back, hint, topic"]},
+    FVal: {why: "Đảm bảo object chứa Flashcard chuẩn Pydantic schema.", icon:"✅", title:"Flashcard Validation", layer:"Tầng 6 · Tạo sinh", file:"src/schemas.py", desc:"Validate flashcard JSON bằng Pydantic.", details:[{label:"Model",value:"FlashcardItem, FlashcardSet"}], funcs:["Validate front/back", "Dedup + filter"]},
+    Export: {why: "Hỗ trợ tải về đa format để ôn tập offline.", icon:"📦", title:"Export Module", layer:"Tầng 6 · Tạo sinh", file:"src/export.py", desc:"Xuất kết quả ra Markdown, JSON, hoặc CSV.", details:[{label:"File",value:"src/export.py"},{label:"Formats",value:"MD, JSON, CSV"}], funcs:["<code>export(model, fmt, output)</code>", "Output tiếng Việt"]},
+
+    // Pipeline D nodes
+    A: {why: "Endpoint RAG.", icon:"❓", title:"Q&A Requests", layer:"Nguồn dữ liệu", desc:"Requests từ /ask và /ask/stream.", details:[], funcs:["Đo latency, cache hit/miss"]},
+    B: {icon:"📚", title:"Learning Requests", layer:"Nguồn dữ liệu", desc:"Requests từ /summarize, /quiz, /flashcards.", details:[], funcs:["Đo latency, request count"]},
+    C: {why: "Endpoint Upload.", icon:"📄", title:"Upload Requests", layer:"Nguồn dữ liệu", desc:"Requests từ /upload.", details:[], funcs:["Track active tasks, chunks indexed"]},
+    D: {why: "Endpoint Feedback.", icon:"👍", title:"Feedback Requests", layer:"Nguồn dữ liệu", desc:"Requests từ /feedback.", details:[], funcs:["Track thumbs up/down"]},
+    C1: {why: "Thống kê mật độ sử dụng.", icon:"📊", title:"rag_requests_total", layer:"Prometheus", desc:"Counter tổng số requests.", details:[{label:"Type",value:"Counter"}], funcs:[]},
+    C2: {why: "Phát hiện chậm nghẽn server.", icon:"⏱️", title:"rag_request_duration_seconds", layer:"Prometheus", desc:"Histogram latency.", details:[{label:"Type",value:"Histogram"}], funcs:[]},
+    C3: {why: "Đánh giá độ hiệu quả của Semantic Cache.", icon:"✅", title:"rag_cache_hits_total", layer:"Prometheus", desc:"Counter cache hits.", details:[{label:"Type",value:"Counter"}], funcs:[]},
+    C4: {why: "Đếm Cache Miss.", icon:"❌", title:"rag_cache_misses_total", layer:"Prometheus", desc:"Counter cache misses.", details:[{label:"Type",value:"Counter"}], funcs:[]},
+    C5: {why: "Đếm số lượng chunk.", icon:"📦", title:"rag_chunks_indexed_total", layer:"Prometheus", desc:"Counter chunks đã index.", details:[{label:"Type",value:"Counter"}], funcs:[]},
+    C6: {why: "Giám sát queue Worker.", icon:"⚙️", title:"rag_active_background_tasks", layer:"Prometheus", desc:"Gauge tasks đang chạy.", details:[{label:"Type",value:"Gauge"}], funcs:[]},
+    C7: {why: "Thống kê mức độ hài lòng.", icon:"👍", title:"rag_feedback_total", layer:"Prometheus", desc:"Counter feedback.", details:[{label:"Type",value:"Counter"}], funcs:[]},
+    T1S: {why: "Cung cấp trace log tổng thể cho 1 request RAG.", icon:"🔍", title:"trace_run()", layer:"LangSmith", file:"src/observability.py", desc:"Context manager tạo distributed trace span.", details:[], funcs:["Ghi input/output mỗi bước"]},
+    T2S: {why: "Mổ xẻ latency của từng node nhỏ bên trong pipeline.", icon:"🔗", title:"Nested Spans", layer:"LangSmith", desc:"Chain → Retrieval → Reranking → LLM.", details:[], funcs:["Hierarchical tracing"]},
+    F1: {why: "Tiếp nhận user signal tốt xấu.", icon:"👍", title:"Thumbs Up/Down", layer:"Feedback", desc:"User feedback cho câu trả lời.", details:[], funcs:["POST /feedback"]},
+    F2: {why: "Lưu database.", icon:"💾", title:"Feedback Storage", layer:"Feedback", desc:"Lưu feedback per session_id.", details:[], funcs:["Lưu score + timestamp"]},
+    EP: {why: "Scrape metrics.", icon:"📊", title:"GET /metrics", layer:"Endpoint", desc:"Prometheus scraper endpoint.", details:[{label:"URL",value:"http://localhost:8000/metrics"}], funcs:["Expose all counters, histograms, gauges"]},
+};
+
+// ── Mermaid init ──
+mermaid.initialize({
+    startOnLoad: true, theme: 'dark', securityLevel: 'loose',
+    themeVariables: {
+        primaryColor: '#1e3a5f', primaryTextColor: '#e0e0e0', primaryBorderColor: '#3b82f6',
+        lineColor: '#60a5fa', secondaryColor: '#2d1b69', tertiaryColor: '#1a3c40',
+        fontFamily: 'Inter, sans-serif', fontSize: '15px',
+    },
+    flowchart: { htmlLabels: true, curve: 'basis', padding: 20, nodeSpacing: 40, rankSpacing: 50 },
+    sequence: { actorMargin: 50, messageMargin: 35, mirrorActors: false, width: 200 }
+});
+
+// ── Modal logic ──
+const overlay = document.getElementById('modalOverlay');
+document.getElementById('modalClose').onclick = () => overlay.classList.remove('show');
+overlay.onclick = (e) => { if (e.target === overlay) overlay.classList.remove('show'); };
+document.addEventListener('keydown', e => { if (e.key === 'Escape') overlay.classList.remove('show'); });
+
+function showModal(nodeId) {
+    const info = nodeInfo[nodeId];
+    if (!info) return;
+
+    document.getElementById('modalIcon').textContent = info.icon || '📦';
+    document.getElementById('modalTitle').textContent = info.title || nodeId;
+    document.getElementById('modalLayer').textContent = info.layer || '';
+
+    let html = `<div class="desc">${info.desc || ''}</div>`;
+
+    
+    if (info.why) {
+        html += `<div class="why-card"><div class="why-title">Tại sao cần làm nhiệm vụ này?</div>${info.why}</div>`;
+    }
+
+    if (info.details && info.details.length > 0) {
+
+        html += '<div class="info-grid">';
+        info.details.forEach(d => {
+            html += `<div class="info-card"><div class="label">${d.label}</div><div class="value">${d.value}</div></div>`;
+        });
+        html += '</div>';
+    }
+
+    if (info.funcs && info.funcs.length > 0) {
+        html += '<ul class="func-list">';
+        info.funcs.forEach(f => { html += `<li>${f}</li>`; });
+        html += '</ul>';
+    }
+
+    if (info.file) {
+        html += `<span class="file-link">📁 ${info.file}</span>`;
+    }
+
+    document.getElementById('modalBody').innerHTML = html;
+    overlay.classList.add('show');
+}
+
+// ── Attach click handlers after Mermaid renders ──
+window.addEventListener('load', () => {
+    setTimeout(() => {
+        document.querySelectorAll('.node, .actor').forEach(node => {
+            let id = '';
+            
+            // 1. Thử lấy từ classList
+            for (let c of node.classList) {
+                if (nodeInfo[c]) { id = c; break; }
+            }
+            
+            // 2. Thử bóc tách từ thuộc tính id của node (flowchart-XXX-123 hoặc state-XXX-123)
+            if (!id && node.id) {
+                let cleanId = node.id.replace(/^(flowchart|state)-/, '').replace(/-\d+$/, '');
+                if (nodeInfo[cleanId]) id = cleanId;
+            }
+            
+            // 3. Dự phòng cực mạnh: lấy text content bên trong hình vẽ để map ngược lại nodeInfo
+            if (!id) {
+                let text = node.textContent || '';
+                for (let key in nodeInfo) {
+                    if (text.includes(key) || (nodeInfo[key].title && text.includes(nodeInfo[key].title))) {
+                        id = key;
+                        break;
+                    }
+                }
+            }
+            
+            if (id && nodeInfo[id]) {
+                // Tạo hiệu ứng click rõ ràng
+                node.style.cursor = 'pointer';
+                node.style.transition = 'all 0.2s';
+                
+                // Backup hover effect qua JS đề phòng CSS bị đè
+                node.addEventListener('mouseenter', () => {
+                    node.style.filter = 'brightness(1.35) drop-shadow(0 0 8px rgba(96,165,250,0.5))';
+                });
+                node.addEventListener('mouseleave', () => {
+                    node.style.filter = '';
+                });
+                
+                node.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    showModal(id);
+                });
+            }
+        });
+    }, 1500); // Đợi Mermaid render xong
+});
+</script>
+</body>
+</html>

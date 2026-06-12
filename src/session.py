@@ -66,9 +66,15 @@ class SessionStore:
     def __init__(self, max_messages: int = 20):
         self._sessions: Dict[str, Session] = {}
         self._max_messages = max_messages
+        self._last_cleanup = time.time()
 
     def get_or_create(self, session_id: str) -> Session:
         """Get existing session or create a new one."""
+        # Passive Garbage Collection (mỗi tiếng 1 lần)
+        if time.time() - self._last_cleanup > 3600:
+            self.cleanup_old()
+            self._last_cleanup = time.time()
+            
         if session_id not in self._sessions:
             self._sessions[session_id] = Session(
                 session_id=session_id,

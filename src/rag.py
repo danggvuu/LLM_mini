@@ -120,7 +120,7 @@ def render_prompt(template_name, **context):
 # Main Answer Pipeline
 # ---------------------------------------------------------------------------
 
-def answer(question, k=None, filters=None, collection_name=None, session_id=None) -> RagAnswer:
+def answer(question, k=None, filters=None, collection_name=None, session_id=None, llm_provider=None) -> RagAnswer:
     """
     Main RAG pipeline:
     1. Check Redis Semantic Cache
@@ -156,12 +156,51 @@ def answer(question, k=None, filters=None, collection_name=None, session_id=None
             answer="Tôi không có đủ thông tin trong ngữ cảnh được cung cấp để trả lời."
         )
 
+    # Determine chat history from NotebookStore
+    chat_history = ""
+    if filters and filters.get("notebook_id"):
+        from src.notebook_store import get_notebook_store
+        nb = get_notebook_store().get_notebook(filters.get("notebook_id"))
+        if nb and nb.messages:
+            # We want recent history, say last 6 messages
+            recent_msgs = nb.messages[-6:]
+            history_lines = []
+            for m in recent_msgs:
+                role_str = "Người dùng" if m["role"] == "user" else "Trợ lý AI"
+                history_lines.append(f"{role_str}: {m['content']}")
+            chat_history = "\n".join(history_lines)
+
+    # Empty cache if low_vram_mode is enabled to free up memory before LLM generation
+    if settings.low_vram_mode:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    # Apply Map-Reduce if document scope and too many chunks
+    if scope.scope_type == "document" and len(chunks) > settings.summarize_batch_size:
+        logger.info(f"Triggering Map-Reduce for {len(chunks)} chunks in answer().")
+        from src.learning import _parse_json, _validate_summary_payload
+        partials = []
+        for start in range(0, len(chunks), settings.summarize_batch_size):
+            batch = chunks[start : start + settings.summarize_batch_size]
+            prompt = render_prompt("summary_map.jinja2", chunks=batch)
+            payload = _parse_json(invoke_llm(prompt, provider=llm_provider))
+            summary_text, key_points = _validate_summary_payload(payload)
+            partials.append({"summary": summary_text, "key_points": key_points})
+        
+        # Convert partials back to chunks for ContextBuilder
+        mapped_chunks = []
+        for i, partial in enumerate(partials):
+            text = f"Tóm tắt phần {i+1}: {partial['summary']}\nÝ chính: {', '.join(partial['key_points'])}"
+            mapped_chunks.append(RetrievedChunk(text=text, score=1.0, metadata=ChunkMetadata(filename="Map-Reduce", page=0, chunk_id=f"map_{i}")))
+        chunks = mapped_chunks
+
     # Step 5: Build context & render prompt
-    context = get_context_builder().build(chunks, scope="query", target=question)
-    prompt = render_prompt(ANSWER_TEMPLATE, question=question, chunks=context.chunks)
+    context = get_context_builder().build(chunks, scope=scope.scope_type, target=question)
+    prompt = render_prompt(ANSWER_TEMPLATE, question=question, chunks=context.chunks, chat_history=chat_history)
 
     # Step 6: Invoke LLM
-    text = invoke_llm(prompt)
+    text = invoke_llm(prompt, provider=llm_provider)
 
     result = RagAnswer(
         question=question,
@@ -176,7 +215,7 @@ def answer(question, k=None, filters=None, collection_name=None, session_id=None
     return result
 
 
-def answer_stream(question, k=None, filters=None, collection_name=None) -> Iterator[str]:
+def answer_stream(question, k=None, filters=None, collection_name=None, llm_provider=None) -> Iterator[str]:
     """
     Streaming RAG pipeline.
     Returns an iterator of text chunks for SSE streaming.
@@ -195,20 +234,73 @@ def answer_stream(question, k=None, filters=None, collection_name=None) -> Itera
 
     record_cache_miss()
 
-    # Retrieve + Rerank
-    chunks = retrieve(question, k=k, filters=filters, collection_name=collection_name)
+    # Route via ScopeRouter
+    router = get_router()
+    scope = router.resolve(query=question, filters=filters, operation="ask")
+
+    if scope.scope_type == "query":
+        chunks = retrieve(question, k=k, filters=scope.filters, collection_name=collection_name)
+    else:
+        chunks = fetch_all_chunks(filters=scope.filters, collection_name=collection_name)
 
     if not chunks:
         yield "Tôi không có đủ thông tin trong ngữ cảnh được cung cấp để trả lời."
         return
 
+    # Determine chat history from NotebookStore
+    chat_history = ""
+    if filters and filters.get("notebook_id"):
+        from src.notebook_store import get_notebook_store
+        nb = get_notebook_store().get_notebook(filters.get("notebook_id"))
+        if nb and nb.messages:
+            recent_msgs = nb.messages[-6:]
+            history_lines = []
+            for m in recent_msgs:
+                role_str = "Người dùng" if m["role"] == "user" else "Trợ lý AI"
+                history_lines.append(f"{role_str}: {m['content']}")
+            chat_history = "\n".join(history_lines)
+
+    # Empty cache if low_vram_mode is enabled to free up memory before LLM generation
+    if settings.low_vram_mode:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    # Apply Map-Reduce if document scope and too many chunks
+    if scope.scope_type == "document" and len(chunks) > settings.summarize_batch_size:
+        yield f"*(Hệ thống đang kích hoạt Map-Reduce để đọc toàn bộ {len(chunks)} đoạn văn bản...)*\n\n"
+        from src.learning import _parse_json, _validate_summary_payload
+        partials = []
+        total_batches = (len(chunks) + settings.summarize_batch_size - 1) // settings.summarize_batch_size
+        
+        for i, start in enumerate(range(0, len(chunks), settings.summarize_batch_size)):
+            batch = chunks[start : start + settings.summarize_batch_size]
+            yield f"⏳ Đang đọc phần {i+1}/{total_batches}...\n"
+            
+            prompt = render_prompt("summary_map.jinja2", chunks=batch)
+            try:
+                payload = _parse_json(invoke_llm(prompt, provider=llm_provider))
+                summary_text, key_points = _validate_summary_payload(payload)
+                partials.append({"summary": summary_text, "key_points": key_points})
+            except Exception as e:
+                logger.error(f"Map step {i+1} failed: {e}")
+                
+        yield f"\n✨ Đã đọc xong! Bắt đầu tổng hợp câu trả lời:\n\n---\n"
+        
+        # Convert partials back to chunks for ContextBuilder
+        mapped_chunks = []
+        for i, partial in enumerate(partials):
+            text = f"Tóm tắt phần {i+1}: {partial['summary']}\nÝ chính: {', '.join(partial['key_points'])}"
+            mapped_chunks.append(RetrievedChunk(text=text, score=1.0, metadata=ChunkMetadata(filename="Map-Reduce", page=0, chunk_id=f"map_{i}")))
+        chunks = mapped_chunks
+
     # Build context & render prompt
-    context = get_context_builder().build(chunks, scope="query", target=question)
-    prompt = render_prompt(ANSWER_TEMPLATE, question=question, chunks=context.chunks)
+    context = get_context_builder().build(chunks, scope=scope.scope_type, target=question)
+    prompt = render_prompt(ANSWER_TEMPLATE, question=question, chunks=context.chunks, chat_history=chat_history)
 
     # Stream LLM response through batcher
     batcher = get_stream_batcher()
-    token_stream = stream_llm(prompt)
+    token_stream = stream_llm(prompt, provider=llm_provider)
 
     collected = []
     for batch in batcher.batch(token_stream):

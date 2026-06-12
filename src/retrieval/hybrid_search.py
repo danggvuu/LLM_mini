@@ -47,9 +47,9 @@ def _semantic_search(
     ]
 
 
-def _bm25_search(query: str, k: int) -> List[RetrievedChunk]:
+def _bm25_search(query: str, k: int, notebook_id: str) -> List[RetrievedChunk]:
     """Keyword search via BM25 index."""
-    bm25_index = get_bm25_index()
+    bm25_index = get_bm25_index(notebook_id)
 
     if bm25_index.is_empty:
         logger.debug("BM25 index is empty, skipping keyword search.")
@@ -132,13 +132,15 @@ class HybridSearcher:
         """
         search_k = k or settings.hybrid_initial_k
 
+        notebook_id = filters.get("notebook_id", "default") if filters else "default"
+
         # Run both searches in parallel
         with ThreadPoolExecutor(max_workers=2) as executor:
             semantic_future = executor.submit(
                 _semantic_search, query, search_k, filters, collection_name
             )
             bm25_future = executor.submit(
-                _bm25_search, query, settings.bm25_top_k
+                _bm25_search, query, settings.bm25_top_k, notebook_id
             )
 
             semantic_results = semantic_future.result()
